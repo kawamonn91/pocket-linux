@@ -1,0 +1,21 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild
+.cxx
+.kotlin/
+*.jks
+*.keystore
+keystore.properties
+
+# 取得したパッケージの展開物（scripts/prepare-proot.sh で作り直せる）
+third_party/termux-debs/x/
+third_party/termux-debs/Packages-*
+third_party/rclone-build/
+
+hs_err_pid*.log
+replay_pid*.log

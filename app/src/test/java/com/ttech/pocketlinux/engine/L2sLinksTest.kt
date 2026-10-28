@@ -5,8 +5,8 @@ import org.junit.Test
 
 class L2sLinksTest {
 
-    private val rootfs = "/data/user/0/com.ttech.pocketlinux/files/containers/a7483163/rootfs"
-    private val restored = "/data/user/0/com.ttech.pocketlinux/files/containers/5b0e1f22/rootfs"
+    private val rootfs = "/data/data/com.ttech.pocketlinux/files/containers/a7483163/rootfs"
+    private val restored = "/data/data/com.ttech.pocketlinux/files/containers/5b0e1f22/rootfs"
 
     @Test
     fun toGuest_rootfsの中を指すリンクはコンテナ内のパスになる() {

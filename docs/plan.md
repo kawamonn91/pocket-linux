@@ -25,6 +25,7 @@ Termux は sudo が使えないため、自作する。
   - イメージは Docker Hub などのレジストリから pull する（arm64 / x86_64）。コンテナは複数作れる。既定は `ubuntu:24.04`
   - ハードリンクは Android で作れないので、展開時はコピーに置き換え、実行時は `--link2symlink` を使う
     - 代わりの隠しファイルは rootfs の `.l2s` にまとめる（`PROOT_L2S_DIR`）。フォルダが無いと `ln` が失敗するので、起動の前に作る
+    - rootfs と `PROOT_L2S_DIR` は実体のパス（`canonicalPath`）で渡す。アプリから見た `/data/user/0` は `/data/data` の別名で、proot は `-r` を実体のパスにしてリンクの中身を書くため、別名のままだとリンクをたどれない（`run-as` では `/data/user/0` が実体なので再現しない）
     - proot はリンクの中身に端末側の絶対パスを書く。バックアップでは、書き出すときにコンテナ内のパスにし、復元するときに新しい rootfs のパスへ戻す（`L2sLinks`）
 - コンテナ内は一般ユーザー `user`（パスワードなし sudo）。ログインは `proot -0` → `su -l user`。proot が setuid を再現するので、本物の sudo が動く（2026-10-27 にエミュレーターで確認）
 - Claude Code（native インストーラー）と agy（Antigravity CLI）が入ることをエミュレーターで確認済み
@@ -61,7 +62,7 @@ Termux は sudo が使えないため、自作する。
 - 初版（エンジン・ターミナル画面・常駐サービス・バックアップ）が main に入っている。公開リポジトリ kawamonn91/pocket-linux
 - エミュレーター（Android 16 / x86_64）で、ubuntu:24.04 の pull・展開・初期設定（sudo・ca-certificates・curl・git など）と、一般ユーザー `user` からの `sudo whoami` を確認済み
 - 2026-10-28 の修正（ブランチ `fix/l2s-backup-refactor`）:
-  - dpkg の失敗（終了コード 100）の原因は、`PROOT_L2S_DIR` のフォルダが無く `ln` が失敗していたこと。一度は設定ごと消して動かしていたが、それだとハードリンクを作ったフォルダ（Drive と同期する場所も）に `.l2s.*` が残るので、設定を戻して起動の前にフォルダを作るようにした
+  - dpkg の失敗（終了コード 100）の原因は2つ。`PROOT_L2S_DIR` のフォルダが無く `ln` が失敗していたことと、`PROOT_L2S_DIR` が `/data/user/0/…`（別名）で proot の rootfs `/data/data/…`（実体）と食い違い、perl のハードリンクの所有者の設定が「ファイルが無い」で失敗していたこと。一度は設定ごと消して動かしていたが、それだとハードリンクを作ったフォルダ（Drive と同期する場所も）に `.l2s.*` が残るので、設定を戻してフォルダを作り、パスを実体にそろえた
   - バックアップを別のコンテナとして復元すると、ハードリンクの代わりのリンクが切れる問題を直した（上の `L2sLinks`）
   - 効いていなかった IPv4 優先の DNS 設定を消した（OkHttp 5 は Happy Eyeballs で IPv6 → IPv4 の順に並べ直すため）
   - 端末画面の NPE は、文字サイズを書体より先に設定して防ぐ（Termux の TerminalView は元のまま）

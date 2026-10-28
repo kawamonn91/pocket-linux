@@ -52,7 +52,9 @@ class ProotLauncher(private val paths: Paths) {
         config.user != null && SU_PATHS.any { File(rootfs, it).exists() || AndroidFileOpsSafe.isSymlink(File(rootfs, it)) }
 
     private fun build(config: ContainerConfig, asRoot: Boolean, options: LaunchOptions, tail: List<String>): LaunchCommand {
-        val rootfs = paths.rootfs(config.id)
+        // 実体のパスで渡す。アプリから見た /data/user/0 は /data/data の別名で、proot は -r を実体のパスにして
+        // リンクの中身もそれで書く。PROOT_L2S_DIR だけ別名のままだとリンクをたどれず、dpkg が perl を展開できない
+        val rootfs = paths.rootfs(config.id).canonicalFile
         File(rootfs, L2sLinks.DIR).mkdirs() // 無いとハードリンクを作れない（L2sLinks を参照）
         val home = if (asRoot || config.user == null) "/root" else config.home
         val user = if (asRoot || config.user == null) "root" else config.user

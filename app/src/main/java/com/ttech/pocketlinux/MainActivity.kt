@@ -28,6 +28,7 @@ import com.ttech.pocketlinux.ui.HomeScreen
 import com.ttech.pocketlinux.ui.Notice
 import com.ttech.pocketlinux.ui.PocketLinuxTheme
 import com.ttech.pocketlinux.ui.TerminalScreen
+import com.ttech.pocketlinux.ui.drive.DriveActions
 import com.ttech.pocketlinux.ui.drive.DriveScreen
 import com.ttech.pocketlinux.ui.settings.SettingsScreen
 import java.text.SimpleDateFormat
@@ -83,6 +84,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         graph.isForeground = true
         noticeVersion++
+        graph.drive.onForeground()
     }
 
     override fun onPause() {
@@ -102,6 +104,7 @@ class MainActivity : ComponentActivity() {
         val revision by graph.sessions.revision.collectAsState()
         val tasks by graph.tasks.tasks.collectAsState()
         val settings by graph.settings.values.collectAsState()
+        val drive by graph.drive.state.collectAsState()
         val notices = remember(noticeVersion) { buildNotices() }
 
         when (val current = screen) {
@@ -124,7 +127,7 @@ class MainActivity : ComponentActivity() {
                 onPaste = { terminalCallbacks.pasteFromClipboard() },
                 onBack = { screen = Screen.Home },
             )
-            Screen.Drive -> DriveScreen(onBack = { screen = Screen.Home })
+            Screen.Drive -> DriveScreen(drive, driveActions, onBack = { screen = Screen.Home })
             Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
         }
     }
@@ -219,6 +222,22 @@ class MainActivity : ComponentActivity() {
             }
             "「${config.name}」として復元しました"
         }
+    }
+
+    // ------------------------------------------------------------ Google ドライブ
+
+    private val driveActions = object : DriveActions {
+        override fun login() = graph.drive.login { graph.urlBridge.openInBrowser(it) }
+
+        override fun logout() = graph.drive.logout()
+        override suspend fun listFolders(path: String) = graph.drive.listFolders(path)
+        override fun addPair(remotePath: String, localName: String): String? =
+            runCatching { graph.drive.addPair(remotePath, localName) }.exceptionOrNull()?.let { it.message ?: "追加できませんでした" }
+
+        override fun removePair(id: String, deleteLocal: Boolean) = graph.drive.removePair(id, deleteLocal)
+        override fun syncNow(id: String) = graph.drive.requestSync(id)
+        override fun resync(id: String) = graph.drive.resync(id)
+        override fun saveExcludes(text: String) = graph.drive.saveExcludes(text)
     }
 
     // ------------------------------------------------------------ ターミナルの操作

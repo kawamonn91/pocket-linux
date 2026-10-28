@@ -52,7 +52,7 @@ Termux は sudo が使えないため、自作する。
 
 1. [x] 技術検証（エミュレーター x86_64 / Android 16）: proot・sudo・Claude Code・agy・rclone
 2. [x] Pocket Linux: エンジン（pull・展開・起動）、ターミナル画面、常駐サービス（一般ユーザー user・sudo whoami 動作確認完了）
-3. [ ] Pocket Linux: Drive 同期、ストレージ、バックアップ・復元、自動実行、IDE 用の窓口
+3. [ ] Pocket Linux: Drive 同期（済み）、ストレージ、バックアップ・復元（済み）、自動実行（済み）、IDE 用の窓口
 4. [ ] pocket-dev: 接続先の追加（Pocket Linux・Drive・SSH）
 5. [ ] 実機（arm64）で確認、ストア用のスクリーンショット
 6. [ ] T-tech Store に公開（コミット・PR・マージと CLAUDE.md への追加は 2026-10-28 に済み）
@@ -73,6 +73,14 @@ Termux は sudo が使えないため、自作する。
 - Drive・手元のファイル・双方向同期（bisync）・ログイン（authorize）・lsjson・mkdir・version だけを入れた rclone v1.75.2 を `scripts/build-rclone.sh` で作り、`jniLibs/*/librclone.so` として同梱する（ARM64 23MB、x86_64 25MB。公式の全機能入りは約 80MB）。Go 1.27.3、`-trimpath -buildvcs=false` で、同じ版の Go なら同じ実行ファイルになる（CI の `rclone.yml` が確かめる）
 - 名前解決は `ConnectProxy`（127.0.0.1 だけで待ち受け、起動ごとの合言葉つき、宛先は 443 番だけ）、証明書は `SSL_CERT_DIR`（Android 14 からの Conscrypt の場所と、古い場所の両方）
 - ログイン（`rclone authorize drive`）・フォルダ一覧・bisync の呼び出しは `drive/Rclone.kt`
+
+## A② Drive の双方向同期（2026-10-28）
+
+- 画面: Drive 画面でログイン → 「フォルダを追加」で Drive のフォルダを選び、端末側の名前（`~/drive/<名前>`）を決める。組ごとに状態・今すぐ同期・最初からやり直す・同期をやめる。「同期しないもの」を編集できる（変えると全部の組を合わせ直す）
+- 仕組み（`drive/DriveSync.kt`）: `rclone bisync`。端末側の変更は `TreeWatcher`（フォルダごとの FileObserver）で見張り、5 秒落ち着いたら送る。Drive 側は 3 分おきとアプリを開いたとき。同じ組の同期は重ねない。組の一覧は `rclone/pairs.json`、除外は `rclone/excludes.txt`
+- ログインの間は常駐サービスを動かす（ブラウザに切り替わった間にアプリが止められ、rclone が同意の結果を受け取れなかったため）。もう一度押すとやり直し、5 分で打ち切る
+- ハードリンク: proot はハードリンクの中身をコンテナの `.l2s` に移すので、Drive のフォルダのファイルがコンテナを指すリンクになる。同期の前に `HardLinkGuard` が普通のファイルに戻す。git はオブジェクトをハードリンクで書くので、コンテナの `/etc/gitconfig` に `core.createObject = rename` を入れる（作成時と起動のたび）
+- エミュレーターと本物の Drive（`G:\マイドライブ\pocket-linux-test`）で確認: ログイン、最初の同期（日本語の名前・下のフォルダ）、端末→Drive（作成・追記・ハードリンク・`node_modules` の除外）、Drive→端末、削除
 
 ## メモ
 

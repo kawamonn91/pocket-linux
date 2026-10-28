@@ -58,6 +58,11 @@ class UrlBridge(
         main.post { open(url) }
     }
 
+    /** アプリから URL を開く（Google のログインなど）。画面が裏にあるときは通知から開けるようにする */
+    fun openInBrowser(url: String) {
+        main.post { open(url) }
+    }
+
     private fun open(url: String) {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (isForeground()) {

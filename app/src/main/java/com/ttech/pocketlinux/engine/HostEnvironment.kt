@@ -2,6 +2,7 @@ package com.ttech.pocketlinux.engine
 
 import android.content.Context
 import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Environment
 import java.io.File
@@ -20,6 +21,12 @@ class HostEnvironment(private val context: Context) {
             .filterNot { it is Inet6Address && it.isLinkLocalAddress }
             .mapNotNull { it.hostAddress?.substringBefore('%') }
     }.getOrDefault(emptyList())
+
+    /** インターネットにつながっているか（Drive の定期的な取り込みを、つながっていないときは休む） */
+    fun isOnline(): Boolean = runCatching {
+        val cm = context.getSystemService(ConnectivityManager::class.java)
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    }.getOrDefault(false)
 
     /** アプリのプロセスが属するグループ（/proc/self/status の Groups 行） */
     fun groupIds(): List<Int> = runCatching {

@@ -6,6 +6,7 @@ class PocketLinuxApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppGraph.init(this)
+        AppGraph.instance.drive.start()
         Notifications.createChannels(this)
     }
 }

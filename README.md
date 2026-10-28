@@ -14,8 +14,8 @@ Android デバイス上で動作する、root 不要の軽量 Linux コンテナ
 ## 開発環境
 
 - **開発言語**: Kotlin / Jetpack Compose
-- **ビルドツール**: Gradle 8.13 / AGP 8.9.1 / NDK r28c
-- **ターゲット**: Android 14+ (API 34〜36)
+- **ビルドツール**: Gradle 9.7.1 / AGP 9.4.0 / NDK 27.1.12297006（端末ライブラリ `libtermux.so` のビルドに使う）
+- **対応 Android**: 8.0 以降（minSdk 26、targetSdk 36）
 - **アーキテクチャ**: ARM64 (`arm64-v8a`), x86_64
 
 ## ビルド方法
@@ -25,3 +25,9 @@ Android デバイス上で動作する、root 不要の軽量 Linux コンテナ
 ```
 
 生成された APK は `app/build/outputs/apk/debug/app-debug.apk` に出力されます。
+
+単体テストは `./gradlew :app:testDebugUnitTest` で実行します。同梱する proot（Termux のビルド）は `scripts/prepare-proot.sh` で作り直せます。
+
+## 開発の状況
+
+初版です。Google ドライブとの同期と、IDE（pocket-dev）との連携はまだ入っていません。決定事項と進み具合は [docs/plan.md](docs/plan.md) にあります。

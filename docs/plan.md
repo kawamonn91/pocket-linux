@@ -24,6 +24,9 @@ Termux は sudo が使えないため、自作する。
   - 実行ファイルは `lib*.so` として APK に入れ、nativeLibraryDir から実行する（Android 10 以降の W^X 制限のため）
   - イメージは Docker Hub などのレジストリから pull する（arm64 / x86_64）。コンテナは複数作れる。既定は `ubuntu:24.04`
   - ハードリンクは Android で作れないので、展開時はコピーに置き換え、実行時は `--link2symlink` を使う
+    - 代わりの隠しファイルは rootfs の `.l2s` にまとめる（`PROOT_L2S_DIR`）。フォルダが無いと `ln` が失敗するので、起動の前に作る
+    - rootfs と `PROOT_L2S_DIR` は実体のパス（`canonicalPath`）で渡す。アプリから見た `/data/user/0` は `/data/data` の別名で、proot は `-r` を実体のパスにしてリンクの中身を書くため、別名のままだとリンクをたどれない（`run-as` では `/data/user/0` が実体なので再現しない）
+    - proot はリンクの中身に端末側の絶対パスを書く。バックアップでは、書き出すときにコンテナ内のパスにし、復元するときに新しい rootfs のパスへ戻す（`L2sLinks`）
 - コンテナ内は一般ユーザー `user`（パスワードなし sudo）。ログインは `proot -0` → `su -l user`。proot が setuid を再現するので、本物の sudo が動く（2026-10-27 にエミュレーターで確認）
 - Claude Code（native インストーラー）と agy（Antigravity CLI）が入ることをエミュレーターで確認済み
 - Google Drive: root なしでは FUSE が使えないため、rclone で選んだフォルダと `~/drive/<名前>` を**双方向に自動同期**する
@@ -52,19 +55,20 @@ Termux は sudo が使えないため、自作する。
 3. [ ] Pocket Linux: Drive 同期、ストレージ、バックアップ・復元、自動実行、IDE 用の窓口
 4. [ ] pocket-dev: 接続先の追加（Pocket Linux・Drive・SSH）
 5. [ ] 実機（arm64）で確認、ストア用のスクリーンショット
-6. [ ] コミット・PR・マージ、T-tech Store に公開、CLAUDE.md の更新
+6. [ ] T-tech Store に公開（コミット・PR・マージと CLAUDE.md への追加は 2026-10-28 に済み）
 
-## 現在の状態（2026-10-28 未明、初版動作確認完了・GitHub 作成へ）
+## 現在の状態（2026-10-28）
 
-- Pocket Linux の初版コード（proot エンジン・ターミナル画面・常駐サービス）を実装完了
-- 中断要因だった課題をすべて解決:
-  - **dpkg エラー（コード 100）**: PROOT_L2S_DIR がゲスト内から到達不能なホスト絶対パスになっていたため削除し、proot 既定の相対ディレクトリ動作に修正。
-  - **IPv6 接続問題**: OkHttpClient に IPv4 優先 DNS 設定を追加し、CloudFront への接続タイムアウトを解消。
-  - **TerminalView NPE**: setTypeface 呼び出し時の null チェック安全対策および初期化順の適正化。
-- エミュレーター（Android 16 / x86_64）にて ubuntu:24.04 コンテナの pull・展開・初期設定（sudo, ca-certificates, curl, git 等）および一般ユーザー（user）での sudo whoami（root 取得）の正常動作を完全確認。
-- これより Git 初期化、コミット、GitHub リポジトリ作成・push・マージを実施。
+- 初版（エンジン・ターミナル画面・常駐サービス・バックアップ）が main に入っている。公開リポジトリ kawamonn91/pocket-linux
+- エミュレーター（Android 16 / x86_64）で、ubuntu:24.04 の pull・展開・初期設定（sudo・ca-certificates・curl・git など）と、一般ユーザー `user` からの `sudo whoami` を確認済み
+- 2026-10-28 の修正（ブランチ `fix/l2s-backup-refactor`）:
+  - dpkg の失敗（終了コード 100）の原因は2つ。`PROOT_L2S_DIR` のフォルダが無く `ln` が失敗していたことと、`PROOT_L2S_DIR` が `/data/user/0/…`（別名）で proot の rootfs `/data/data/…`（実体）と食い違い、perl のハードリンクの所有者の設定が「ファイルが無い」で失敗していたこと。一度は設定ごと消して動かしていたが、それだとハードリンクを作ったフォルダ（Drive と同期する場所も）に `.l2s.*` が残るので、設定を戻してフォルダを作り、パスを実体にそろえた
+  - バックアップを別のコンテナとして復元すると、ハードリンクの代わりのリンクが切れる問題を直した（上の `L2sLinks`）
+  - 効いていなかった IPv4 優先の DNS 設定を消した（OkHttp 5 は Happy Eyeballs で IPv6 → IPv4 の順に並べ直すため）
+  - 端末画面の NPE は、文字サイズを書体より先に設定して防ぐ（Termux の TerminalView は元のまま）
+- 未着手: 実機（arm64）での確認、配色（ライトテーマの tertiary）、設定画面・Drive 画面（仮置き）、Drive 同期（rclone の同梱）、IDE の窓口、pocket-dev 側の改修、テスト（今は `L2sLinks` だけ）、ストア公開
 
 ## メモ
 
-- テスト用 AVD は pocketlinux（データ領域 24GB。既存の yomumemo は 6GB で足りない）
-- gh auth login は設定完了済み
+- テスト用 AVD は `pocketlinux`（データ領域 24GB。既存の `yomumemo` は 6GB で足りない）
+- `gh` は 2026-10-28 時点でログイン済み

@@ -20,12 +20,15 @@ import java.util.zip.GZIPOutputStream
  *
  * 中身は rootfs そのもの（`docker import` などでも使える）で、Pocket Linux の設定は
  * 先頭の `.pocket-linux-container.json` に入れる。
+ * ハードリンクの代わりのリンクは、書き出すときにコンテナ内のパスにし、復元するときに戻す（[L2sLinks]）。
  */
 class BackupManager(private val paths: Paths, private val store: ContainerStore) {
 
     suspend fun export(id: String, output: OutputStream, onProgress: (Int) -> Unit) = withContext(Dispatchers.IO) {
         val config = store.load(id) ?: throw ContainerException("コンテナが見つかりません")
         val rootfs = paths.rootfs(id)
+        // リンクの中身は proot が使う実体のパス（/data/data/…）で書かれている（ProotLauncher を参照）
+        val hostRoot = rootfs.canonicalPath
         var count = 0
         TarArchiveOutputStream(GZIPOutputStream(BufferedOutputStream(output, 1 shl 16), 1 shl 16)).use { tar ->
             tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
@@ -45,7 +48,7 @@ class BackupManager(private val paths: Paths, private val store: ContainerStore)
                     when {
                         android.system.OsConstants.S_ISLNK(stat.st_mode) -> {
                             val entry = TarArchiveEntry(name, TarConstants.LF_SYMLINK)
-                            entry.linkName = Os.readlink(child.path)
+                            entry.linkName = L2sLinks.toGuest(hostRoot, Os.readlink(child.path))
                             tar.putArchiveEntry(entry)
                             tar.closeArchiveEntry()
                         }
@@ -88,13 +91,10 @@ class BackupManager(private val paths: Paths, private val store: ContainerStore)
             val id = store.newId()
             val rootfs = paths.rootfs(id)
             try {
-                var read = 0L
-                val counting = object : java.io.FilterInputStream(BufferedInputStream(input, 1 shl 16)) {
-                    override fun read(b: ByteArray, off: Int, len: Int): Int =
-                        super.read(b, off, len).also { if (it > 0) { read += it; if (read % (4 shl 20) < it) onProgress(read) } }
-                }
+                val counting = CountingInputStream(BufferedInputStream(input, 1 shl 16), 4L shl 20, onProgress)
+                val hostRoot = rootfs.apply { mkdirs() }.canonicalPath
                 TarArchiveInputStream(GZIPInputStream(counting, 1 shl 16)).use { tar ->
-                    LayerExtractor(AndroidFileOps).extract(tar, rootfs)
+                    LayerExtractor(AndroidFileOps).extract(tar, rootfs) { L2sLinks.toHost(hostRoot, it) }
                 }
                 val configFile = File(rootfs, CONFIG_ENTRY)
                 val restored = configFile.takeIf { it.isFile }?.let { runCatching { store.decode(it.readText()) }.getOrNull() }

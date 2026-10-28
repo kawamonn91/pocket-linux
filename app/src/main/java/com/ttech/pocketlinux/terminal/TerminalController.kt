@@ -1,7 +1,5 @@
 package com.ttech.pocketlinux.terminal
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -103,7 +101,7 @@ class TerminalController(
         val v = view ?: return false
         if (!v.isSelectingText) return false
         val text = v.selectedText ?: return false
-        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Pocket Linux", text))
+        Clipboard.copy(context, text)
         v.stopTextSelectionMode()
         return true
     }

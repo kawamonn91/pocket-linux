@@ -30,13 +30,14 @@ class LayerExtractor(private val ops: FileOps) {
         root.mkdirs()
         val total = archive.length()
         FileInputStream(archive).use { fileIn ->
-            val counting = CountingInputStream(BufferedInputStream(fileIn, 1 shl 16)) { read -> onProgress(read, total) }
+            val counting = CountingInputStream(BufferedInputStream(fileIn, 1 shl 16), 512L * 1024) { read -> onProgress(read, total) }
             val decompressed: InputStream = if (gzip) GZIPInputStream(counting, 1 shl 16) else counting
             TarArchiveInputStream(decompressed).use { tar -> return extract(tar, root) }
         }
     }
 
-    fun extract(tar: TarArchiveInputStream, root: File): Result {
+    /** @param linkTarget シンボリックリンクの中身を書き換える（バックアップの復元で使う） */
+    fun extract(tar: TarArchiveInputStream, root: File, linkTarget: (String) -> String = { it }): Result {
         val createdInLayer = HashSet<String>()
         val deferredLinks = ArrayList<Triple<File, String, Int>>()
         var files = 0
@@ -84,7 +85,7 @@ class LayerExtractor(private val ops: FileOps) {
                     }
                     entry.isSymbolicLink -> {
                         replace(target)
-                        ops.symlink(entry.linkName, target)
+                        ops.symlink(linkTarget(entry.linkName), target)
                     }
                     entry.isLink -> {
                         val source = RootfsPath.normalizeEntryName(entry.linkName)
@@ -144,33 +145,38 @@ class LayerExtractor(private val ops: FileOps) {
         return true
     }
 
-    private class CountingInputStream(input: InputStream, private val onRead: (Long) -> Unit) : FilterInputStream(input) {
-        private var count = 0L
-        private var lastReport = 0L
-
-        override fun read(): Int {
-            val b = super.read()
-            if (b >= 0) advance(1)
-            return b
-        }
-
-        override fun read(b: ByteArray, off: Int, len: Int): Int {
-            val n = super.read(b, off, len)
-            if (n > 0) advance(n.toLong())
-            return n
-        }
-
-        private fun advance(n: Long) {
-            count += n
-            if (count - lastReport >= 512 * 1024) {
-                lastReport = count
-                onRead(count)
-            }
-        }
-    }
-
     companion object {
         const val WHITEOUT_PREFIX = ".wh."
         const val OPAQUE_WHITEOUT = ".wh..wh..opq"
+    }
+}
+
+/** 読んだバイト数を数え、[reportEvery] バイト進むごとに知らせる（展開・復元の進み具合） */
+internal class CountingInputStream(
+    input: InputStream,
+    private val reportEvery: Long,
+    private val onRead: (Long) -> Unit,
+) : FilterInputStream(input) {
+    private var count = 0L
+    private var lastReport = 0L
+
+    override fun read(): Int {
+        val b = super.read()
+        if (b >= 0) advance(1)
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val n = super.read(b, off, len)
+        if (n > 0) advance(n.toLong())
+        return n
+    }
+
+    private fun advance(n: Long) {
+        count += n
+        if (count - lastReport >= reportEvery) {
+            lastReport = count
+            onRead(count)
+        }
     }
 }

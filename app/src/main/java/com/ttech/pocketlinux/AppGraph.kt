@@ -3,6 +3,7 @@ package com.ttech.pocketlinux
 import android.app.Application
 import com.ttech.pocketlinux.bridge.UrlBridge
 import com.ttech.pocketlinux.drive.ConnectProxy
+import com.ttech.pocketlinux.drive.DriveSync
 import com.ttech.pocketlinux.drive.Rclone
 import com.ttech.pocketlinux.engine.BackupManager
 import com.ttech.pocketlinux.engine.ContainerManager
@@ -11,6 +12,7 @@ import com.ttech.pocketlinux.engine.HostEnvironment
 import com.ttech.pocketlinux.engine.Paths
 import com.ttech.pocketlinux.engine.ProotLauncher
 import com.ttech.pocketlinux.engine.RegistryClient
+import com.ttech.pocketlinux.service.ContainerService
 import com.ttech.pocketlinux.terminal.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +51,9 @@ class AppGraph(val app: Application) {
     var isForeground = false
 
     val urlBridge = UrlBridge(app, paths.openUrlDir) { isForeground }
+
+    /** Google ドライブとの双方向の自動同期（PocketLinuxApp で start する） */
+    val drive = DriveSync(paths, rclone, scope, activity, host::isOnline) { ContainerService.ensureRunning(app) }
 
     companion object {
         lateinit var instance: AppGraph

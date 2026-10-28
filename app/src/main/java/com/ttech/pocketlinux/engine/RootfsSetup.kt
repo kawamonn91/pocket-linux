@@ -15,6 +15,7 @@ class RootfsSetup(private val ops: FileOps) {
         runCatching { ops.chmod(File(rootfs, "tmp"), "1777".toInt(8)) }
         writeResolvConf(rootfs, dnsServers)
         writeHosts(rootfs)
+        ensureGitConfig(rootfs)
         writeEtcFile(rootfs, "etc/hostname", "$HOSTNAME\n")
 
         writeEtcFile(rootfs, "etc/profile.d/pocket-linux.sh", PROFILE_SCRIPT)
@@ -84,6 +85,18 @@ class RootfsSetup(private val ops: FileOps) {
         writeEtcFile(rootfs, "etc/resolv.conf", servers.joinToString("") { "nameserver $it\n" })
     }
 
+    /**
+     * git がオブジェクトを書くときにハードリンクを使わないようにする（core.createObject = rename）。
+     * proot ではハードリンクの中身がコンテナの中に移るため、Drive と同期するフォルダのリポジトリが壊れる
+     * （drive/HardLinkGuard を参照）。既に設定されていれば何もしない
+     */
+    fun ensureGitConfig(rootfs: File) {
+        val file = File(rootfs, "etc/gitconfig")
+        val current = if (file.isFile && !ops.isSymlink(file)) file.readText() else ""
+        if (current.contains("createObject", ignoreCase = true)) return
+        writeEtcFile(rootfs, "etc/gitconfig", current + GIT_CONFIG)
+    }
+
     private fun writeHosts(rootfs: File) {
         val hosts = File(rootfs, "etc/hosts")
         val current = if (hosts.isFile && !ops.isSymlink(hosts)) hosts.readText() else ""
@@ -111,6 +124,13 @@ class RootfsSetup(private val ops: FileOps) {
 
     companion object {
         const val HOSTNAME = "pocket-linux"
+
+        private val GIT_CONFIG = """
+            |
+            |# Pocket Linux が追加: proot ではハードリンクの中身がコンテナの中に移るため、名前の変更で書く
+            |[core]
+            |	createObject = rename
+            |""".trimMargin()
 
         private val IGNORED_IMAGE_ENV = setOf("HOME", "USER", "LOGNAME", "HOSTNAME", "TERM", "SHELL", "PWD")
 

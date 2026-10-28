@@ -107,6 +107,8 @@ class ContainerManager(
     /** コンテナを開く前に、その時点の DNS を書き込む */
     fun beforeLaunch(config: ContainerConfig) {
         runCatching { setup.writeResolvConf(paths.rootfs(config.id), host.dnsServers()) }
+        // 前の版で作ったコンテナにも、git の設定を足す
+        runCatching { setup.ensureGitConfig(paths.rootfs(config.id)) }
     }
 
     suspend fun delete(id: String) = withContext(Dispatchers.IO) { store.delete(id) }

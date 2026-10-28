@@ -8,10 +8,14 @@ import kotlinx.coroutines.flow.update
 /** ターミナル以外で常駐サービスを必要とするもの（Drive の同期・IDE のサーバー）の状態 */
 class BackgroundActivity {
 
-    data class State(val syncing: Boolean = false, val ideRunning: Boolean = false) {
-        val anyRunning: Boolean get() = syncing || ideRunning
+    data class State(val syncing: Boolean = false, val ideRunning: Boolean = false, val loggingIn: Boolean = false) {
+        val anyRunning: Boolean get() = syncing || ideRunning || loggingIn
         val summary: String
-            get() = listOfNotNull("Drive を同期中".takeIf { syncing }, "IDE のサーバー".takeIf { ideRunning }).joinToString("・")
+            get() = listOfNotNull(
+                "Google にログイン中".takeIf { loggingIn },
+                "Drive を同期中".takeIf { syncing },
+                "IDE のサーバー".takeIf { ideRunning },
+            ).joinToString("・")
     }
 
     private val _state = MutableStateFlow(State())

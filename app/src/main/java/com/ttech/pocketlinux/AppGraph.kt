@@ -2,6 +2,8 @@ package com.ttech.pocketlinux
 
 import android.app.Application
 import com.ttech.pocketlinux.bridge.UrlBridge
+import com.ttech.pocketlinux.drive.ConnectProxy
+import com.ttech.pocketlinux.drive.Rclone
 import com.ttech.pocketlinux.engine.BackupManager
 import com.ttech.pocketlinux.engine.ContainerManager
 import com.ttech.pocketlinux.engine.ContainerStore
@@ -37,6 +39,9 @@ class AppGraph(val app: Application) {
     val backups = BackupManager(paths, store)
     val sessions = SessionManager(app, store, launcher, containers)
     val tasks = TaskTracker()
+
+    /** Google ドライブとの同期に使う rclone（名前解決は端末内のプロキシ経由） */
+    val rclone = Rclone(paths, ConnectProxy())
     val activity = BackgroundActivity()
 
     /** 画面が前面にあるか（裏にあるときはブラウザを直接開けない） */

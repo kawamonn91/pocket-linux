@@ -68,6 +68,12 @@ Termux は sudo が使えないため、自作する。
   - 端末画面の NPE は、文字サイズを書体より先に設定して防ぐ（Termux の TerminalView は元のまま）
 - 未着手: 実機（arm64）での確認、配色（ライトテーマの tertiary）、設定画面・Drive 画面（仮置き）、Drive 同期（rclone の同梱）、IDE の窓口、pocket-dev 側の改修、テスト（今は `L2sLinks` だけ）、ストア公開
 
+## A① rclone の同梱（2026-10-28）
+
+- Drive・手元のファイル・双方向同期（bisync）・ログイン（authorize）・lsjson・mkdir・version だけを入れた rclone v1.75.2 を `scripts/build-rclone.sh` で作り、`jniLibs/*/librclone.so` として同梱する（ARM64 23MB、x86_64 25MB。公式の全機能入りは約 80MB）。Go 1.27.3、`-trimpath -buildvcs=false` で、同じ版の Go なら同じ実行ファイルになる（CI の `rclone.yml` が確かめる）
+- 名前解決は `ConnectProxy`（127.0.0.1 だけで待ち受け、起動ごとの合言葉つき、宛先は 443 番だけ）、証明書は `SSL_CERT_DIR`（Android 14 からの Conscrypt の場所と、古い場所の両方）
+- ログイン（`rclone authorize drive`）・フォルダ一覧・bisync の呼び出しは `drive/Rclone.kt`
+
 ## メモ
 
 - テスト用 AVD は `pocketlinux`（データ領域 24GB。既存の `yomumemo` は 6GB で足りない）

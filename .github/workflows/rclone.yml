@@ -1,0 +1,46 @@
+# 同梱している rclone（app/src/main/jniLibs/*/librclone.so）が、scripts/build-rclone.sh で
+# ソースから作り直したものと同じかを確かめる（コミットした実行ファイルが改ざんされていないことの確認）。
+# rclone まわりを変えた PR と、main への push のときだけ動く。
+name: rclone
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "scripts/build-rclone.sh"
+      - "scripts/rclone/**"
+      - "app/src/main/jniLibs/*/librclone.so"
+      - ".github/workflows/rclone.yml"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/build-rclone.sh"
+      - "scripts/rclone/**"
+      - "app/src/main/jniLibs/*/librclone.so"
+      - ".github/workflows/rclone.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: rclone を作り直して比べる
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # 手元と同じ版の Go でないと同じ実行ファイルにならない
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: false
+
+      - name: コミットされている rclone のハッシュ
+        run: sha256sum app/src/main/jniLibs/*/librclone.so | tee committed.sha256
+
+      - name: ソースから作り直す
+        run: bash scripts/build-rclone.sh
+
+      - name: 作り直したものと比べる
+        run: sha256sum -c committed.sha256

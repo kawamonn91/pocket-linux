@@ -12,6 +12,7 @@ import com.ttech.pocketlinux.engine.HostEnvironment
 import com.ttech.pocketlinux.engine.Paths
 import com.ttech.pocketlinux.engine.ProotLauncher
 import com.ttech.pocketlinux.engine.RegistryClient
+import com.ttech.pocketlinux.ide.IdeServer
 import com.ttech.pocketlinux.service.ContainerService
 import com.ttech.pocketlinux.terminal.SessionManager
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +55,28 @@ class AppGraph(val app: Application) {
 
     /** Google ドライブとの双方向の自動同期（PocketLinuxApp で start する） */
     val drive = DriveSync(paths, rclone, scope, activity, host::isOnline) { ContainerService.ensureRunning(app) }
+
+    /** IDE の窓口（pocket-dev のサーバー）。設定に合わせて applyIdeSettings で動かす・止める */
+    val ide = IdeServer(paths, app.assets, launcher, containers, scope, activity) { ContainerService.ensureRunning(app) }
+    private var appliedIde: List<Any?>? = null
+
+    /** IDE の設定を反映する。動かす設定で、使えるコンテナがあれば起動し、設定が変わっていれば起動し直す */
+    @Synchronized
+    fun applyIdeSettings() {
+        val values = settings.current
+        val container = store.all.value.filter { it.setupDone }.let { list ->
+            list.firstOrNull { it.id == values.ideContainerId } ?: list.firstOrNull()
+        }
+        if (!values.ideEnabled || container == null) {
+            appliedIde = null
+            ide.stop()
+            return
+        }
+        val wanted = listOf(container.id, values.idePort, values.ideToken, values.ideAllowLan)
+        if (wanted == appliedIde && ide.state.value.running) return
+        appliedIde = wanted
+        ide.start(container, values.idePort, values.ideToken, values.ideAllowLan)
+    }
 
     companion object {
         lateinit var instance: AppGraph

@@ -30,6 +30,8 @@ import com.ttech.pocketlinux.ui.PocketLinuxTheme
 import com.ttech.pocketlinux.ui.TerminalScreen
 import com.ttech.pocketlinux.ui.drive.DriveActions
 import com.ttech.pocketlinux.ui.drive.DriveScreen
+import com.ttech.pocketlinux.terminal.Clipboard
+import com.ttech.pocketlinux.ui.settings.SettingsActions
 import com.ttech.pocketlinux.ui.settings.SettingsScreen
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -105,6 +107,7 @@ class MainActivity : ComponentActivity() {
         val tasks by graph.tasks.tasks.collectAsState()
         val settings by graph.settings.values.collectAsState()
         val drive by graph.drive.state.collectAsState()
+        val ide by graph.ide.state.collectAsState()
         val notices = remember(noticeVersion) { buildNotices() }
 
         when (val current = screen) {
@@ -128,7 +131,17 @@ class MainActivity : ComponentActivity() {
                 onBack = { screen = Screen.Home },
             )
             Screen.Drive -> DriveScreen(drive, driveActions, onBack = { screen = Screen.Home })
-            Screen.Settings -> SettingsScreen(onBack = { screen = Screen.Home })
+            Screen.Settings -> SettingsScreen(
+                settings = settings,
+                containers = containers,
+                ide = ide,
+                // 設定アプリから戻ったとき（onResume）にも読み直す
+                storageGranted = remember(noticeVersion) { graph.host.hasStorageAccess() },
+                cacheBytes = remember(noticeVersion) { graph.containers.cacheSize() },
+                addresses = remember(noticeVersion) { graph.host.localAddresses() },
+                actions = settingsActions,
+                onBack = { screen = Screen.Home },
+            )
         }
     }
 
@@ -221,6 +234,38 @@ class MainActivity : ComponentActivity() {
                 graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
             }
             "「${config.name}」として復元しました"
+        }
+    }
+
+    // ------------------------------------------------------------ 設定
+
+    private val settingsActions = object : SettingsActions {
+        override fun update(change: (AppSettings.Values) -> AppSettings.Values) {
+            graph.settings.update(change)
+            graph.applyIdeSettings()
+        }
+
+        override fun regenerateIdeToken() {
+            graph.settings.regenerateIdeToken()
+            graph.applyIdeSettings()
+        }
+
+        override fun copy(text: String) {
+            Clipboard.copy(this@MainActivity, text)
+            toast("コピーしました")
+        }
+
+        override fun openInBrowser(url: String) = graph.urlBridge.openInBrowser(url)
+
+        override fun requestStorageAccess() {
+            runCatching {
+                startActivity(Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:$packageName")))
+            }.onFailure { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+        }
+
+        override fun clearCache() {
+            graph.containers.clearCache()
+            noticeVersion++
         }
     }
 

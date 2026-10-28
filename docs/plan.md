@@ -52,7 +52,7 @@ Termux は sudo が使えないため、自作する。
 
 1. [x] 技術検証（エミュレーター x86_64 / Android 16）: proot・sudo・Claude Code・agy・rclone
 2. [x] Pocket Linux: エンジン（pull・展開・起動）、ターミナル画面、常駐サービス（一般ユーザー user・sudo whoami 動作確認完了）
-3. [ ] Pocket Linux: Drive 同期（済み）、ストレージ、バックアップ・復元（済み）、自動実行（済み）、IDE 用の窓口
+3. [x] Pocket Linux: Drive 同期、ストレージ、バックアップ・復元、自動実行、IDE 用の窓口（2026-10-28）
 4. [ ] pocket-dev: 接続先の追加（Pocket Linux・Drive・SSH）
 5. [ ] 実機（arm64）で確認、ストア用のスクリーンショット
 6. [ ] T-tech Store に公開（コミット・PR・マージと CLAUDE.md への追加は 2026-10-28 に済み）
@@ -81,6 +81,13 @@ Termux は sudo が使えないため、自作する。
 - ログインの間は常駐サービスを動かす（ブラウザに切り替わった間にアプリが止められ、rclone が同意の結果を受け取れなかったため）。もう一度押すとやり直し、5 分で打ち切る
 - ハードリンク: proot はハードリンクの中身をコンテナの `.l2s` に移すので、Drive のフォルダのファイルがコンテナを指すリンクになる。同期の前に `HardLinkGuard` が普通のファイルに戻す。git はオブジェクトをハードリンクで書くので、コンテナの `/etc/gitconfig` に `core.createObject = rename` を入れる（作成時と起動のたび）
 - エミュレーターと本物の Drive（`G:\マイドライブ\pocket-linux-test`）で確認: ログイン、最初の同期（日本語の名前・下のフォルダ）、端末→Drive（作成・追記・ハードリンク・`node_modules` の除外）、Drive→端末、削除
+
+## A③ 設定画面と IDE の窓口（2026-10-28）
+
+- IDE の窓口（`ide/IdeServer.kt`）: pocket-dev の `agent/`・`web/` を `scripts/vendor-pocket-dev.sh` で `assets/pocket-dev/` に取り込み（取り込んだ版は `VERSION`）、起動時に `files/pocket-dev` に展開してコンテナの `/opt/pocket-dev` に見せる。選んだコンテナの一般ユーザーで `python3 -m agent.server --root ~/drive` を動かす（Python が無ければ sudo で入れる）。トークンは環境変数 `POCKETDEV_TOKEN` で渡す。既定は 127.0.0.1、設定で 0.0.0.0（LAN・Tailscale）
+- kawamonn91/pocket-dev は 2026-10-28 に公開に切り替えた（公開前に履歴全体に秘密の情報が無いことを確認）
+- 設定画面: IDE（動かす・コンテナ・LAN・ポート・URL のコピーとブラウザで開く・トークンの作り直し・ログ）、文字の大きさ・ベル・二重入力の回避、スリープさせない、端末のストレージの許可、イメージのキャッシュの削除、オープンソースのライセンス
+- エミュレーターで確認: 設定で IDE をオン → Python を入れて約 2 分で起動、`/health` が応答、トークンなしは 401、`~/drive` の一覧、IDE の API で書いたファイルが Drive を通って PC の Google ドライブに届く（約 45 秒）
 
 ## メモ
 

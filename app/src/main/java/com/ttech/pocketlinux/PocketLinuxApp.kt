@@ -7,6 +7,7 @@ class PocketLinuxApp : Application() {
         super.onCreate()
         AppGraph.init(this)
         AppGraph.instance.drive.start()
+        AppGraph.instance.applyIdeSettings()
         Notifications.createChannels(this)
     }
 }

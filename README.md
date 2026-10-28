@@ -26,7 +26,7 @@ Android デバイス上で動作する、root 不要の軽量 Linux コンテナ
 
 生成された APK は `app/build/outputs/apk/debug/app-debug.apk` に出力されます。
 
-単体テストは `./gradlew :app:testDebugUnitTest` で実行します。同梱する proot（Termux のビルド）は `scripts/prepare-proot.sh` で作り直せます。
+単体テストは `./gradlew :app:testDebugUnitTest` で実行します。PR では GitHub Actions で同じテスト・lint・ビルドが走り、通ると自動でマージされます（[docs/ci.md](docs/ci.md)）。同梱する proot（Termux のビルド）は `scripts/prepare-proot.sh` で作り直せます。
 
 ## 開発の状況
 

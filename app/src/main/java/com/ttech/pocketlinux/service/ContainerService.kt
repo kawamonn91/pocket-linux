@@ -1,5 +1,6 @@
 package com.ttech.pocketlinux.service
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.PendingIntent
 import android.app.Service
@@ -89,6 +90,8 @@ class ContainerService : Service() {
         }
     }
 
+    // SPECIAL_USE は Android 14 からの値だが、ServiceCompat が Android 10〜13 では種類を 0xFF で絞って渡すので落ちない
+    @SuppressLint("InlinedApi")
     private fun startForegroundCompat(notification: Notification) {
         ServiceCompat.startForeground(
             this,

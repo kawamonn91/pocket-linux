@@ -135,7 +135,7 @@ class MainActivity : ComponentActivity() {
         override fun createContainer(image: String, name: String, installTools: Boolean) {
             ContainerService.ensureRunning(this@MainActivity)
             graph.tasks.start(graph.scope, "コンテナを作成: $image") {
-                val config = graph.containers.create(image, name, installTools, { label, fraction -> progress(label, fraction) }, { log(it) })
+                val config = graph.containers.create(image, name, installTools, asProgress()) { log(it) }
                 "「${config.name}」を作成しました"
             }
         }
@@ -155,7 +155,7 @@ class MainActivity : ComponentActivity() {
             val config = graph.store.load(containerId) ?: return
             ContainerService.ensureRunning(this@MainActivity)
             graph.tasks.start(graph.scope, "初期設定: ${config.name}") {
-                val updated = graph.containers.runSetup(config, installTools = false, { label, fraction -> progress(label, fraction) }, { log(it) })
+                val updated = graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
                 if (updated.sudoInstalled) "sudo を使えるようになりました" else "sudo を入れられませんでした（ログを確認してください）"
             }
         }
@@ -215,7 +215,7 @@ class MainActivity : ComponentActivity() {
                 graph.backups.import(stream, fallbackName) { read -> progress("読み込み中（${ContainerManager.formatBytes(read)}）") }
             }
             if (!config.setupDone) {
-                graph.containers.runSetup(config, installTools = false, { label, fraction -> progress(label, fraction) }, { log(it) })
+                graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
             }
             "「${config.name}」として復元しました"
         }
@@ -265,7 +265,7 @@ class MainActivity : ComponentActivity() {
             it.copy(fontSizeSp = (it.fontSizeSp + delta).coerceIn(AppSettings.MIN_FONT, AppSettings.MAX_FONT))
         }
 
-        override fun resetFontSize() = graph.settings.update { it.copy(fontSizeSp = 14) }
+        override fun resetFontSize() = graph.settings.update { it.copy(fontSizeSp = AppSettings.DEFAULT_FONT) }
 
         override fun pasteFromClipboard() {
             controller.currentSession?.let { graph.sessions.onPasteTextFromClipboard(it) }
@@ -307,6 +307,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+
+    /** コンテナの作成・初期設定の進み具合を、処理の一覧に出す */
+    private fun TaskTracker.Context.asProgress() = ContainerManager.ProgressListener { label, fraction -> progress(label, fraction) }
 
     companion object {
         const val EXTRA_OPEN_TERMINAL = "open_terminal"

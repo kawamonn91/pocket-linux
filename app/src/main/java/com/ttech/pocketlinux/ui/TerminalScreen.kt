@@ -159,8 +159,7 @@ fun TerminalScreen(
                 factory = { context ->
                     TerminalView(context, null).apply {
                         setTerminalViewClient(controller)
-                        val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSizeSp.toFloat(), context.resources.displayMetrics)
-                        setTextSize(px.toInt())
+                        applyFontSize(fontSizeSp)
                         setTypeface(Typeface.MONOSPACE)
                         isFocusable = true
                         isFocusableInTouchMode = true
@@ -169,8 +168,7 @@ fun TerminalScreen(
                     }
                 },
                 update = { view ->
-                    val px = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, fontSizeSp.toFloat(), view.resources.displayMetrics)
-                    view.setTextSize(px.toInt())
+                    view.applyFontSize(fontSizeSp)
                     current?.let { controller.attach(it.terminal) }
                 },
                 onRelease = { view -> if (controller.view === view) controller.view = null },
@@ -283,4 +281,12 @@ private fun RowScope.KeyButton(label: String, active: Boolean = false, repeat: B
             maxLines = 1,
         )
     }
+}
+
+/**
+ * 文字サイズ（sp）を端末ビューに反映する。setTypeface より先に呼ぶ
+ * （TerminalView は文字サイズを決めたときに描画の準備をするため、先に書体を設定すると落ちる）。
+ */
+private fun TerminalView.applyFontSize(sp: Int) {
+    setTextSize(TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, sp.toFloat(), resources.displayMetrics).toInt())
 }

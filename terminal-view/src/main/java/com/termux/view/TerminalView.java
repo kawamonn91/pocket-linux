@@ -501,8 +501,7 @@ public final class TerminalView extends View {
     }
 
     public void setTypeface(Typeface newTypeface) {
-        int textSize = mRenderer == null ? 14 : mRenderer.mTextSize;
-        mRenderer = new TerminalRenderer(textSize, newTypeface);
+        mRenderer = new TerminalRenderer(mRenderer.mTextSize, newTypeface);
         updateSize();
         invalidate();
     }

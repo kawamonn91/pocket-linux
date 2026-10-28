@@ -13,9 +13,7 @@ import com.ttech.pocketlinux.terminal.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import okhttp3.Dns
 import okhttp3.OkHttpClient
-import java.net.Inet4Address
 import java.util.concurrent.TimeUnit
 
 /**
@@ -29,11 +27,6 @@ class AppGraph(val app: Application) {
     val settings = AppSettings(app)
     val host = HostEnvironment(app)
     val http: OkHttpClient = OkHttpClient.Builder()
-        .dns { hostname ->
-            runCatching {
-                Dns.SYSTEM.lookup(hostname).sortedBy { if (it is Inet4Address) 0 else 1 }
-            }.getOrElse { Dns.SYSTEM.lookup(hostname) }
-        }
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()

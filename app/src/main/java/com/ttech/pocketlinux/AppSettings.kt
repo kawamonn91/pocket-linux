@@ -32,7 +32,7 @@ class AppSettings(context: Context) {
     private fun read(): Values {
         if (!prefs.contains(KEY_IDE_TOKEN)) prefs.edit { putString(KEY_IDE_TOKEN, newToken()) }
         return Values(
-            fontSizeSp = prefs.getInt(KEY_FONT, 14),
+            fontSizeSp = prefs.getInt(KEY_FONT, DEFAULT_FONT),
             enforceCharInput = prefs.getBoolean(KEY_CHAR_INPUT, false),
             vibrateOnBell = prefs.getBoolean(KEY_BELL, true),
             ideEnabled = prefs.getBoolean(KEY_IDE_ENABLED, false),
@@ -64,6 +64,7 @@ class AppSettings(context: Context) {
 
     companion object {
         const val MIN_FONT = 8
+        const val DEFAULT_FONT = 14
         const val MAX_FONT = 32
 
         private const val KEY_FONT = "font_size_sp"

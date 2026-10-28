@@ -2,12 +2,14 @@ package com.ttech.pocketlinux
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 時間のかかる処理（コンテナの作成・バックアップ・復元・初期設定）の進み具合。
@@ -34,7 +36,7 @@ class TaskTracker {
 
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
-    private val jobs = mutableMapOf<Int, Job>()
+    private val jobs = ConcurrentHashMap<Int, Job>()
     private var nextId = 1
 
     val runningCount: Int get() = _tasks.value.count { it.state == State.RUNNING }
@@ -50,7 +52,8 @@ class TaskTracker {
             override fun log(line: String) =
                 change(id) { it.copy(log = (it.log + line).takeLast(MAX_LOG_LINES)) }
         }
-        jobs[id] = scope.launch {
+        // 登録してから始める（すぐ終わる処理で、登録より先に remove が走って残らないように）
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 val message = block(context)
                 change(id) { it.copy(state = State.DONE, label = "", fraction = 1f, message = message ?: "完了しました") }
@@ -62,6 +65,8 @@ class TaskTracker {
                 jobs.remove(id)
             }
         }
+        jobs[id] = job
+        job.start()
         return id
     }
 

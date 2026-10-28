@@ -1,7 +1,5 @@
 package com.ttech.pocketlinux.terminal
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
 import com.termux.terminal.TerminalSession
@@ -145,13 +143,11 @@ class SessionManager(
 
     override fun onCopyTextToClipboard(session: TerminalSession, text: String?) {
         if (text.isNullOrEmpty()) return
-        val clipboard = context.getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("Pocket Linux", text))
+        Clipboard.copy(context, text)
     }
 
     override fun onPasteTextFromClipboard(session: TerminalSession?) {
-        val clipboard = context.getSystemService(ClipboardManager::class.java)
-        val text = clipboard.primaryClip?.getItemAt(0)?.coerceToText(context)?.toString() ?: return
+        val text = Clipboard.read(context) ?: return
         session?.emulator?.paste(text)
     }
 

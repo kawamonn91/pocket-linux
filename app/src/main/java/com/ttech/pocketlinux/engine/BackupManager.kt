@@ -20,6 +20,7 @@ import java.util.zip.GZIPOutputStream
  *
  * 中身は rootfs そのもの（`docker import` などでも使える）で、Pocket Linux の設定は
  * 先頭の `.pocket-linux-container.json` に入れる。
+ * ハードリンクの代わりのリンクは、書き出すときにコンテナ内のパスにし、復元するときに戻す（[L2sLinks]）。
  */
 class BackupManager(private val paths: Paths, private val store: ContainerStore) {
 
@@ -45,7 +46,7 @@ class BackupManager(private val paths: Paths, private val store: ContainerStore)
                     when {
                         android.system.OsConstants.S_ISLNK(stat.st_mode) -> {
                             val entry = TarArchiveEntry(name, TarConstants.LF_SYMLINK)
-                            entry.linkName = Os.readlink(child.path)
+                            entry.linkName = L2sLinks.toGuest(rootfs.path, Os.readlink(child.path))
                             tar.putArchiveEntry(entry)
                             tar.closeArchiveEntry()
                         }
@@ -88,13 +89,9 @@ class BackupManager(private val paths: Paths, private val store: ContainerStore)
             val id = store.newId()
             val rootfs = paths.rootfs(id)
             try {
-                var read = 0L
-                val counting = object : java.io.FilterInputStream(BufferedInputStream(input, 1 shl 16)) {
-                    override fun read(b: ByteArray, off: Int, len: Int): Int =
-                        super.read(b, off, len).also { if (it > 0) { read += it; if (read % (4 shl 20) < it) onProgress(read) } }
-                }
+                val counting = CountingInputStream(BufferedInputStream(input, 1 shl 16), 4L shl 20, onProgress)
                 TarArchiveInputStream(GZIPInputStream(counting, 1 shl 16)).use { tar ->
-                    LayerExtractor(AndroidFileOps).extract(tar, rootfs)
+                    LayerExtractor(AndroidFileOps).extract(tar, rootfs) { L2sLinks.toHost(rootfs.path, it) }
                 }
                 val configFile = File(rootfs, CONFIG_ENTRY)
                 val restored = configFile.takeIf { it.isFile }?.let { runCatching { store.decode(it.readText()) }.getOrNull() }

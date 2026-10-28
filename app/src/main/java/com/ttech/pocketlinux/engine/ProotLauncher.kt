@@ -51,11 +51,9 @@ class ProotLauncher(private val paths: Paths) {
     private fun canSwitchUser(config: ContainerConfig, rootfs: File): Boolean =
         config.user != null && SU_PATHS.any { File(rootfs, it).exists() || AndroidFileOpsSafe.isSymlink(File(rootfs, it)) }
 
-    private fun loginShell(rootfs: File): String =
-        if (File(rootfs, "bin/bash").exists() || File(rootfs, "usr/bin/bash").exists()) "/bin/bash" else "/bin/sh"
-
     private fun build(config: ContainerConfig, asRoot: Boolean, options: LaunchOptions, tail: List<String>): LaunchCommand {
         val rootfs = paths.rootfs(config.id)
+        File(rootfs, L2sLinks.DIR).mkdirs() // 無いとハードリンクを作れない（L2sLinks を参照）
         val home = if (asRoot || config.user == null) "/root" else config.home
         val user = if (asRoot || config.user == null) "root" else config.user
         val args = buildArgs(
@@ -115,6 +113,8 @@ class ProotLauncher(private val paths: Paths) {
     private fun hostEnv(rootfs: File): List<String> = buildList {
         add("PROOT_LOADER=${paths.prootLoader.path}")
         add("PROOT_TMP_DIR=${paths.prootTmpDir.path}")
+        // ハードリンクの代わりに作る隠しファイルは、作業フォルダ（Drive と同期する場所など）ではなく rootfs に置く
+        add("PROOT_L2S_DIR=${File(rootfs, L2sLinks.DIR).path}")
         add("PATH=/system/bin")
         add("HOME=${paths.filesDir.path}")
         System.getenv("ANDROID_ROOT")?.let { add("ANDROID_ROOT=$it") }
@@ -130,6 +130,10 @@ class ProotLauncher(private val paths: Paths) {
         const val GUEST_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         const val STORAGE_DIR = "/storage/emulated/0"
         private val SU_PATHS = listOf("bin/su", "usr/bin/su", "sbin/su")
+
+        /** ログインに使うシェル（bash が無いイメージでは sh） */
+        fun loginShell(rootfs: File): String =
+            if (File(rootfs, "bin/bash").exists() || File(rootfs, "usr/bin/bash").exists()) "/bin/bash" else "/bin/sh"
 
         /** 単体テストできるよう、組み立て部分だけを切り出している */
         fun buildArgs(

@@ -34,7 +34,7 @@ class RootfsSetup(private val ops: FileOps) {
     /** パッケージを入れた後に、一般ユーザーと sudo の設定を作る */
     fun createUser(rootfs: File, config: ContainerConfig, androidGids: List<Int>, nowMillis: Long = System.currentTimeMillis()) {
         val user = config.user ?: return
-        val shell = if (File(rootfs, "bin/bash").exists() || File(rootfs, "usr/bin/bash").exists()) "/bin/bash" else "/bin/sh"
+        val shell = ProotLauncher.loginShell(rootfs)
         val passwd = File(rootfs, "etc/passwd")
         val group = File(rootfs, "etc/group")
         val shadow = File(rootfs, "etc/shadow")

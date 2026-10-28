@@ -54,8 +54,8 @@ Termux は sudo が使えないため、自作する。
 2. [x] Pocket Linux: エンジン（pull・展開・起動）、ターミナル画面、常駐サービス（一般ユーザー user・sudo whoami 動作確認完了）
 3. [x] Pocket Linux: Drive 同期、ストレージ、バックアップ・復元、自動実行、IDE 用の窓口（2026-10-28）
 4. [ ] pocket-dev: 接続先の追加（Pocket Linux・Drive・SSH）
-5. [ ] 実機（arm64）で確認、ストア用のスクリーンショット
-6. [ ] T-tech Store に公開（コミット・PR・マージと CLAUDE.md への追加は 2026-10-28 に済み）
+5. [x] 実機（arm64）で確認、ストア用のスクリーンショット（2026-10-28）
+6. [x] T-tech Store に公開（2026-10-28、1.0.0。https://store.kawamonn.com/apps/pocket-linux）
 
 ## 現在の状態（2026-10-28）
 
@@ -88,6 +88,13 @@ Termux は sudo が使えないため、自作する。
 - kawamonn91/pocket-dev は 2026-10-28 に公開に切り替えた（公開前に履歴全体に秘密の情報が無いことを確認）
 - 設定画面: IDE（動かす・コンテナ・LAN・ポート・URL のコピーとブラウザで開く・トークンの作り直し・ログ）、文字の大きさ・ベル・二重入力の回避、スリープさせない、端末のストレージの許可、イメージのキャッシュの削除、オープンソースのライセンス
 - エミュレーターで確認: 設定で IDE をオン → Python を入れて約 2 分で起動、`/health` が応答、トークンなしは 401、`~/drive` の一覧、IDE の API で書いたファイルが Drive を通って PC の Google ドライブに届く（約 45 秒）
+
+## 公開（2026-10-28）
+
+- 実機 Xiaomi 2407FPN8ER（Android 16・arm64-v8a）で確認: リリース版のインストール、ARM64 版の proot でのコンテナの作成（66 秒、sudo とツールを含む）、`sudo whoami` → root、`uname -m` → aarch64、ARM64 版の rclone の起動
+- リリース版の署名鍵は `pocket-linux.jks` と `keystore.properties`（Git の対象外。なくすとストアで更新を配れない）。証明書の SHA-256 は `522b6c71…7590`
+- T-tech Store に 1.0.0 を公開（カテゴリ: ツール）。掲載内容は `store/listing.md`、アイコンは `store/icon.svg`、スクリーンショットはエミュレーターで撮った 4 枚。実機の T-tech Store アプリからインストールできることを確認
+- 次は 4（pocket-dev アプリの接続先の追加）
 
 ## メモ
 

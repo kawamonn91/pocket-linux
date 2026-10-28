@@ -1,0 +1,8 @@
+# シェルスクリプトは Windows で取り出しても LF のままにする（WSL や CI の bash で動かすため）
+*.sh text eol=lf
+gradlew text eol=lf
+
+# 同梱する実行ファイルとパッケージ
+*.so binary
+*.deb binary
+*.jar binary

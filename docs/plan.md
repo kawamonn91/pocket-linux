@@ -53,11 +53,14 @@ Termux は sudo が使えないため、自作する。
 1. [x] 技術検証（エミュレーター x86_64 / Android 16）: proot・sudo・Claude Code・agy・rclone
 2. [x] Pocket Linux: エンジン（pull・展開・起動）、ターミナル画面、常駐サービス（一般ユーザー user・sudo whoami 動作確認完了）
 3. [x] Pocket Linux: Drive 同期、ストレージ、バックアップ・復元、自動実行、IDE 用の窓口（2026-10-28）
-4. [ ] pocket-dev: 接続先の追加（Pocket Linux・Drive・SSH）
+4. [x] pocket-dev: 接続先の追加（Pocket Linux・SSH 対応完了。2026-10-28 に ttech-store PR #4, #5 マージ済み）
 5. [x] 実機（arm64）で確認、ストア用のスクリーンショット（2026-10-28）
 6. [x] T-tech Store に公開（2026-10-28、1.0.0。https://store.kawamonn.com/apps/pocket-linux）
 
 ## 現在の状態（2026-10-28）
+
+- Pocket Linux 1.0.0 が T-tech Store で公開完了。
+- pocket-dev（IDE アプリ）側も接続先改修（Pocket Linux 同端末接続、SSH 接続による SFTP 編集＋PTY ターミナル）が完了し、ttech-store の main にマージ済み。
 
 - 初版（エンジン・ターミナル画面・常駐サービス・バックアップ）が main に入っている。公開リポジトリ kawamonn91/pocket-linux
 - エミュレーター（Android 16 / x86_64）で、ubuntu:24.04 の pull・展開・初期設定（sudo・ca-certificates・curl・git など）と、一般ユーザー `user` からの `sudo whoami` を確認済み

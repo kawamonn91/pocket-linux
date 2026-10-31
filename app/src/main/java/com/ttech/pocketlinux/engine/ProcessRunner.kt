@@ -7,9 +7,12 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.concurrent.thread
 
 /** PTY を使わずにコマンドを実行し、出力を1行ずつ受け取る（初期設定・同期など） */
 object ProcessRunner {
+
+    data class Output(val exit: Int, val stdout: String, val stderr: String)
 
     fun start(command: LaunchCommand, mergeStderr: Boolean = true): Process {
         val builder = ProcessBuilder(command.argv)
@@ -42,4 +45,24 @@ object ProcessRunner {
             killer.cancel()
         }
     }
+
+    /** 標準出力と標準エラーを分けて受け取る（JSON を読むコマンド用など） */
+    suspend fun capture(command: LaunchCommand): Output = coroutineScope {
+        val process = start(command, mergeStderr = false)
+        val killer = launch { try { awaitCancellation() } finally { process.destroyForcibly() } }
+        try {
+            withContext(Dispatchers.IO) {
+                process.outputStream.close()
+                val stderr = StringBuilder()
+                val drain = thread(isDaemon = true) { stderr.append(process.errorStream.bufferedReader().readText()) }
+                val stdout = process.inputStream.bufferedReader().readText()
+                val exit = process.waitFor()
+                drain.join()
+                Output(exit, stdout, stderr.toString())
+            }.also { ensureActive() }
+        } finally {
+            killer.cancel()
+        }
+    }
 }
+

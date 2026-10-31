@@ -3,11 +3,6 @@ package com.ttech.pocketlinux.drive
 import com.ttech.pocketlinux.engine.LaunchCommand
 import com.ttech.pocketlinux.engine.Paths
 import com.ttech.pocketlinux.engine.ProcessRunner
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -16,7 +11,8 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
-import kotlin.concurrent.thread
+
+typealias Output = ProcessRunner.Output
 
 /**
  * 同梱の rclone（scripts/build-rclone.sh で作る Linux 版）を、アプリのプロセスから直接動かす（コンテナの外）。
@@ -57,25 +53,7 @@ class Rclone(private val paths: Paths, private val proxy: ConnectProxy) {
     suspend fun run(args: List<String>, onLine: (String) -> Unit): Int = ProcessRunner.run(command(args), onLine)
 
     /** 標準出力と標準エラーを分けて受け取る（JSON を読むコマンド用） */
-    suspend fun capture(args: List<String>): Output = coroutineScope {
-        val process = ProcessRunner.start(command(args), mergeStderr = false)
-        val killer = launch { try { awaitCancellation() } finally { process.destroyForcibly() } }
-        try {
-            withContext(Dispatchers.IO) {
-                process.outputStream.close()
-                val stderr = StringBuilder()
-                val drain = thread(isDaemon = true) { stderr.append(process.errorStream.bufferedReader().readText()) }
-                val stdout = process.inputStream.bufferedReader().readText()
-                val exit = process.waitFor()
-                drain.join()
-                Output(exit, stdout, stderr.toString())
-            }
-        } finally {
-            killer.cancel()
-        }
-    }
-
-    data class Output(val exit: Int, val stdout: String, val stderr: String)
+    suspend fun capture(args: List<String>): Output = ProcessRunner.capture(command(args))
 
     /**
      * Google でログインする。同意画面の URL を [openUrl] でブラウザに開き、同意が終わると

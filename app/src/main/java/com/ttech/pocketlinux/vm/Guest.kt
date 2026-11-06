@@ -18,7 +18,10 @@ import kotlin.concurrent.thread
 import kotlin.coroutines.resume
 
 /** ゲストのコマンドの結果 */
-data class GuestOutput(val exit: Int, val stdout: String, val stderr: String, val error: String? = null)
+data class GuestOutput(val exit: Int, val stdout: String, val stderr: String, val error: String? = null) {
+    /** 失敗した理由（error → 標準エラーの最後の行 → 終了コード） */
+    fun failureReason(): String = Guest.failureDetail(error, stderr) ?: "終了コード $exit"
+}
 
 /**
  * VM の中で動かす処理をコルーチンから使う入口。呼ぶと VM が動いていなければ起動する。
@@ -200,8 +203,11 @@ class Guest(private val vm: VmManager) {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
 
+        fun failureDetail(error: String?, stderr: String): String? =
+            error ?: stderr.lineSequence().lastOrNull { it.isNotBlank() }?.trim()
+
         fun failureMessage(op: String, exit: GuestExit, stderr: String): String {
-            val detail = exit.error ?: stderr.lineSequence().lastOrNull { it.isNotBlank() }?.trim()
+            val detail = failureDetail(exit.error, stderr)
             return if (detail.isNullOrEmpty()) "$op に失敗しました（終了コード ${exit.code}）" else "$op に失敗しました: $detail"
         }
     }

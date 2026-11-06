@@ -292,6 +292,6 @@ class RegistryClient(private val http: OkHttpClient) {
             MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
         private fun JsonObject.string(key: String): String? =
-            (this[key] as? JsonElement)?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
+            this[key]?.let { runCatching { it.jsonPrimitive.contentOrNull }.getOrNull() }
     }
 }

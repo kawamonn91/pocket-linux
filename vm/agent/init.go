@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -14,6 +15,9 @@ import (
 )
 
 var bootTime = time.Now()
+
+// trimDelay は起動してから、使っていない領域を返すまでの時間。
+const trimDelay = 2 * time.Minute
 
 // dataMounted は /data（データ用のディスク）が使えるか。ready でアプリに知らせる。
 var dataMounted bool
@@ -32,6 +36,7 @@ func runInit() {
 	bringUpLoopback()
 	setupData()
 	setupStorage()
+	setupZram()
 	for _, d := range []string{"/data/containers", "/data/drive", "/data/pocket-dev", "/data/system/home", "/data/system/rclone"} {
 		_ = os.MkdirAll(d, 0o755)
 	}
@@ -40,6 +45,11 @@ func runInit() {
 
 	go children.loop()
 	go clockLoop()
+	go func() {
+		// 前に動かしたときに消した分を、起動が落ち着いてから端末へ返す
+		time.Sleep(trimDelay)
+		trimData()
+	}()
 
 	port, err := openAgentPort()
 	for err != nil {
@@ -174,6 +184,61 @@ func growData(dev string) error {
 	defer dir.Close()
 	logf("データ用のディスクを %d MB から %d MB に広げます", blocks*blockSize>>20, want*blockSize>>20)
 	return ioctl(dir.Fd(), ioctlEXT4RESIZEFS, uintptr(unsafe.Pointer(&want)))
+}
+
+// setupZram はメモリの半分を上限に、圧縮したスワップ（zram）を有効にする。VM のメモリを節約できる。
+func setupZram() {
+	var memKB uint64
+	if b, err := os.ReadFile("/proc/meminfo"); err == nil {
+		_, _ = fmt.Sscanf(string(b), "MemTotal: %d kB", &memKB)
+	}
+	if memKB == 0 {
+		return
+	}
+	size := memKB * 1024 / 2
+	if err := os.WriteFile("/sys/block/zram0/disksize", []byte(strconv.FormatUint(size, 10)), 0o644); err != nil {
+		logf("zram を用意できません: %v", err)
+		return
+	}
+	dev, err := os.OpenFile("/dev/zram0", os.O_WRONLY, 0)
+	if err != nil {
+		logf("zram を開けません: %v", err)
+		return
+	}
+	defer dev.Close()
+	// mkswap と同じ見出し（struct swap_header_v1_2）
+	pageSize := os.Getpagesize()
+	header := make([]byte, pageSize)
+	binary.LittleEndian.PutUint32(header[1024:], 1)
+	binary.LittleEndian.PutUint32(header[1028:], uint32(size/uint64(pageSize))-1)
+	copy(header[pageSize-10:], "SWAPSPACE2")
+	if _, err := dev.Write(header); err != nil {
+		logf("zram に書けません: %v", err)
+		return
+	}
+	name, err := syscall.BytePtrFromString("/dev/zram0")
+	if err != nil {
+		return
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_SWAPON, uintptr(unsafe.Pointer(name)), 0, 0); errno != 0 {
+		logf("zram を有効にできません: %v", errno)
+	}
+}
+
+// trimData は /data で使っていないブロックを QEMU に知らせる。data.img は疎ファイルなので、その分だけ端末の容量が空く。
+func trimData() {
+	if !dataMounted {
+		return
+	}
+	dir, err := os.Open(dataDir)
+	if err != nil {
+		return
+	}
+	defer dir.Close()
+	r := struct{ start, length, minLength uint64 }{0, ^uint64(0), 1 << 20}
+	if err := ioctl(dir.Fd(), ioctlFITRIM, uintptr(unsafe.Pointer(&r))); err != nil {
+		logf("使っていない領域を返せません: %v", err)
+	}
 }
 
 // setupStorage は端末のストレージ（9p、タグ storage）があれば /mnt/storage に mount する。

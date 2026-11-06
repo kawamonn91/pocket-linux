@@ -9,8 +9,6 @@ object Accounts {
     data class Result(val passwd: String, val group: String, val shadow: String?, val uid: Int)
 
     /**
-     * @param androidGids アプリのプロセスが属する Android のグループ。
-     *   名前が無いと `groups: cannot find name for group ID 3003` と出るため、`aid_3003` のような名前を付ける
      * @param daysSinceEpoch /etc/shadow の「最後にパスワードを変えた日」
      */
     fun addUser(
@@ -20,7 +18,6 @@ object Accounts {
         user: String,
         home: String,
         shell: String,
-        androidGids: List<Int>,
         daysSinceEpoch: Long,
     ): Result {
         val passwdLines = lines(passwd)
@@ -48,12 +45,6 @@ object Accounts {
 
         val newGroup = groupLines.toMutableList()
         if (newGroup.none { it.substringBefore(':') == user }) newGroup += "$user:x:$uid:"
-        val knownGids = newGroup.mapNotNull { it.split(':').getOrNull(2)?.toIntOrNull() }.toMutableSet()
-        for (gid in androidGids.distinct()) {
-            if (gid in knownGids || gid == 0) continue
-            newGroup += "aid_$gid:x:$gid:"
-            knownGids += gid
-        }
 
         val newShadow = shadow?.let { text ->
             val shadowLines = lines(text)

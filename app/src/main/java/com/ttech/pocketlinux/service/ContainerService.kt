@@ -21,8 +21,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * コンテナのプロセスを裏でも動かし続けるための常駐サービス。
- * ターミナル・作成中の処理・同期・IDE のサーバーのどれかが動いている間だけ起動する。
+ * VM（QEMU の子プロセス）を裏でも動かし続けるための常駐サービス。
+ * VM・作成中の処理・同期・IDE のサーバーのどれかが動いている間だけ起動する。
  *
  * Android は前面サービスの無いアプリのプロセス（とその子プロセス）を、裏に回ると凍結・終了するため。
  */
@@ -37,7 +37,6 @@ class ContainerService : Service() {
     override fun onCreate() {
         super.onCreate()
         startForegroundCompat(buildNotification(0, 0, false))
-        graph.urlBridge.start()
         watcher = graph.scope.launch {
             combine(
                 graph.sessions.sessions,
@@ -75,7 +74,6 @@ class ContainerService : Service() {
     override fun onDestroy() {
         watcher?.cancel()
         updateWakeLock(false)
-        graph.urlBridge.stop()
         super.onDestroy()
     }
 
@@ -120,7 +118,7 @@ class ContainerService : Service() {
         return NotificationCompat.Builder(this, Notifications.CHANNEL_RUNNING)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Pocket Linux を実行中")
-            .setContentText(parts.joinToString("・").ifEmpty { "準備中" })
+            .setContentText(parts.joinToString("・").ifEmpty { "待機中（しばらく使わなければ止まります）" })
             .setContentIntent(open)
             .setOngoing(true)
             .setSilent(true)

@@ -23,6 +23,12 @@ class AppSettings(context: Context) {
         val idePort: Int,
         val ideToken: String,
         val keepAwake: Boolean,
+        /** VM のメモリ（MB）。0 は端末に合わせた既定 */
+        val vmMemoryMb: Int,
+        /** VM の CPU の数。0 は端末に合わせた既定 */
+        val vmCpus: Int,
+        /** データ用ディスクの上限（GB）。大きくはできるが、小さくはできない */
+        val vmDiskGb: Int,
     )
 
     private val _values = MutableStateFlow(read())
@@ -41,6 +47,9 @@ class AppSettings(context: Context) {
             idePort = prefs.getInt(KEY_IDE_PORT, 8765),
             ideToken = prefs.getString(KEY_IDE_TOKEN, null) ?: newToken(),
             keepAwake = prefs.getBoolean(KEY_KEEP_AWAKE, false),
+            vmMemoryMb = prefs.getInt(KEY_VM_MEMORY, 0),
+            vmCpus = prefs.getInt(KEY_VM_CPUS, 0),
+            vmDiskGb = prefs.getInt(KEY_VM_DISK, DEFAULT_VM_DISK_GB),
         )
     }
 
@@ -56,6 +65,9 @@ class AppSettings(context: Context) {
             putInt(KEY_IDE_PORT, next.idePort)
             putString(KEY_IDE_TOKEN, next.ideToken)
             putBoolean(KEY_KEEP_AWAKE, next.keepAwake)
+            putInt(KEY_VM_MEMORY, next.vmMemoryMb)
+            putInt(KEY_VM_CPUS, next.vmCpus)
+            putInt(KEY_VM_DISK, next.vmDiskGb)
         }
         _values.value = next
     }
@@ -66,6 +78,7 @@ class AppSettings(context: Context) {
         const val MIN_FONT = 8
         const val DEFAULT_FONT = 14
         const val MAX_FONT = 32
+        const val DEFAULT_VM_DISK_GB = 32
 
         private const val KEY_FONT = "font_size_sp"
         private const val KEY_CHAR_INPUT = "enforce_char_input"
@@ -76,6 +89,9 @@ class AppSettings(context: Context) {
         private const val KEY_IDE_PORT = "ide_port"
         private const val KEY_IDE_TOKEN = "ide_token"
         private const val KEY_KEEP_AWAKE = "keep_awake"
+        private const val KEY_VM_MEMORY = "vm_memory_mb"
+        private const val KEY_VM_CPUS = "vm_cpus"
+        private const val KEY_VM_DISK = "vm_disk_gb"
 
         /** pocket-dev の auth.generate_token と同じく 24 バイトの URL 安全な文字列 */
         fun newToken(): String {

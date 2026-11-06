@@ -115,7 +115,6 @@ fun DriveScreen(state: DriveSync.State, actions: DriveActions, onBack: () -> Uni
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             when {
-                !state.available -> item { InfoCard("この端末向けの rclone が入っていないため、Drive と同期できません。") }
                 !state.loggedIn -> item { LoginCard(state.loggingIn, state.loginError, actions::login) }
                 else -> {
                     item {

@@ -20,6 +20,9 @@ Termux は sudo が使えないため、自作する。
 
 ### Pocket Linux
 
+> **2.0（2026-11）で、コンテナの動かし方を proot から軽量 VM に変えた。** 設計と進み具合は [vm-plan.md](vm-plan.md)、アプリとゲストの約束事は [vm-protocol.md](vm-protocol.md)。
+> この節の proot・`.l2s`・`HardLinkGuard`・Android 上の rclone の話は 1.x のときの記録。1.x のデータを移すところ（`LegacyMigration`）にだけ残っている。
+
 - コンテナは proot（Termux のビルドを同梱）。root 化は不要
   - 実行ファイルは `lib*.so` として APK に入れ、nativeLibraryDir から実行する（Android 10 以降の W^X 制限のため）
   - イメージは Docker Hub などのレジストリから pull する（arm64 / x86_64）。コンテナは複数作れる。既定は `ubuntu:24.04`

@@ -31,7 +31,6 @@ class AccountsTest {
             user = "developer",
             home = "/home/developer",
             shell = "/bin/bash",
-            androidGids = listOf(3003, 1015, 3003, 0),
             daysSinceEpoch = 20758L,
         )
 
@@ -40,11 +39,8 @@ class AccountsTest {
         // passwd の確認
         assertTrue(result.passwd.contains("developer:x:1000:1000:Pocket Linux:/home/developer:/bin/bash\n"))
 
-        // group の確認 (ユーザーグループ + aid_ グループ、gid 0 はスキップ、重複排除)
+        // group の確認
         assertTrue(result.group.contains("developer:x:1000:\n"))
-        assertTrue(result.group.contains("aid_3003:x:3003:\n"))
-        assertTrue(result.group.contains("aid_1015:x:1015:\n"))
-        assertEquals(1, result.group.split("aid_3003").size - 1)
 
         // shadow の確認
         assertNotNull(result.shadow)
@@ -61,7 +57,6 @@ class AccountsTest {
             user = "newUser",
             home = "/home/newUser",
             shell = "/bin/zsh",
-            androidGids = emptyList(),
             daysSinceEpoch = 20000L,
         )
 
@@ -82,7 +77,6 @@ class AccountsTest {
             user = "user1",
             home = "/home/user1",
             shell = "/bin/bash",
-            androidGids = listOf(3003),
             daysSinceEpoch = 20758L,
         )
 
@@ -105,7 +99,6 @@ class AccountsTest {
             user = "alpineUser",
             home = "/home/alpineUser",
             shell = "/bin/sh",
-            androidGids = emptyList(),
             daysSinceEpoch = 20758L,
         )
 

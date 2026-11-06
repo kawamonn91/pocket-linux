@@ -5,7 +5,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.io.File
 
 class RcloneTest {
 
@@ -46,12 +45,12 @@ class RcloneTest {
 
     @Test
     fun bisyncArgs_初回だけresyncを付ける() {
-        val args = Rclone.bisyncArgs("dev/app", File("/l"), File("/w"), File("/e"), resync = false)
-        assertEquals(listOf("bisync", "gdrive:dev/app", File("/l").path), args.take(3))
+        val args = Rclone.bisyncArgs("dev/app", "/l", "/w", "/e", resync = false)
+        assertEquals(listOf("bisync", "gdrive:dev/app", "/l"), args.take(3))
         assertTrue("--copy-links" in args)
         assertTrue("--drive-skip-gdocs" in args)
         assertFalse("--resync" in args)
-        val first = Rclone.bisyncArgs("dev/app", File("/l"), File("/w"), File("/e"), resync = true)
+        val first = Rclone.bisyncArgs("dev/app", "/l", "/w", "/e", resync = true)
         assertTrue(first.containsAll(listOf("--resync", "--resync-mode", "newer")))
     }
 }

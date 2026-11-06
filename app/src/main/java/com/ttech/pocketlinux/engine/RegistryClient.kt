@@ -24,12 +24,8 @@ class RegistryException(message: String) : IOException(message)
 /** コンテナの CPU の種類（OCI の platform.architecture / variant） */
 data class Platform(val architecture: String, val variant: String?) {
     companion object {
-        /** Android の ABI 名から決める */
-        fun fromAbi(abi: String): Platform = when (abi) {
-            "arm64-v8a" -> Platform("arm64", "v8")
-            "x86_64" -> Platform("amd64", null)
-            else -> throw IllegalArgumentException("この端末の CPU（$abi）には対応していません")
-        }
+        /** VM の中の CPU。端末の種類にかかわらず arm64（エミュレーターの x86_64 でも同じ） */
+        val GUEST = Platform("arm64", "v8")
     }
 }
 

@@ -1,4 +1,4 @@
-# 同梱している rclone（app/src/main/jniLibs/*/librclone.so）が、scripts/build-rclone.sh で
+# VM に入れる rclone（vm/rclone-arm64）が、scripts/build-rclone.sh で
 # ソースから作り直したものと同じかを確かめる（コミットした実行ファイルが改ざんされていないことの確認）。
 # rclone まわりを変えた PR と、main への push のときだけ動く。
 name: rclone
@@ -9,14 +9,14 @@ on:
     paths:
       - "scripts/build-rclone.sh"
       - "scripts/rclone/**"
-      - "app/src/main/jniLibs/*/librclone.so"
+      - "vm/rclone-arm64"
       - ".github/workflows/rclone.yml"
   push:
     branches: [main]
     paths:
       - "scripts/build-rclone.sh"
       - "scripts/rclone/**"
-      - "app/src/main/jniLibs/*/librclone.so"
+      - "vm/rclone-arm64"
       - ".github/workflows/rclone.yml"
 
 permissions:
@@ -37,7 +37,7 @@ jobs:
           cache: false
 
       - name: コミットされている rclone のハッシュ
-        run: sha256sum app/src/main/jniLibs/*/librclone.so | tee committed.sha256
+        run: sha256sum vm/rclone-arm64 | tee committed.sha256
 
       - name: ソースから作り直す
         run: bash scripts/build-rclone.sh

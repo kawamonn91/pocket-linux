@@ -1,15 +1,12 @@
 package com.ttech.pocketlinux.engine
 
-import android.system.Os
+import com.ttech.pocketlinux.vm.Guest
+import com.ttech.pocketlinux.vm.GuestCommands
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry
-import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
-import org.apache.commons.compress.archivers.tar.TarConstants
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
-import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.util.zip.GZIPInputStream
@@ -19,86 +16,35 @@ import java.util.zip.GZIPOutputStream
  * コンテナを tar.gz に書き出す・戻す。
  *
  * 中身は rootfs そのもの（`docker import` などでも使える）で、Pocket Linux の設定は
- * 先頭の `.pocket-linux-container.json` に入れる。
- * ハードリンクの代わりのリンクは、書き出すときにコンテナ内のパスにし、復元するときに戻す（[L2sLinks]）。
+ * ルートの `.pocket-linux-container.json` に入れる。tar はゲストが作り、gzip は端末側で行う。
  */
-class BackupManager(private val paths: Paths, private val store: ContainerStore) {
+class BackupManager(private val store: ContainerStore, private val guest: Guest, private val containers: ContainerManager) {
 
-    suspend fun export(id: String, output: OutputStream, onProgress: (Int) -> Unit) = withContext(Dispatchers.IO) {
+    suspend fun export(id: String, output: OutputStream, onProgress: (Long) -> Unit) = withContext(Dispatchers.IO) {
         val config = store.load(id) ?: throw ContainerException("コンテナが見つかりません")
-        val rootfs = paths.rootfs(id)
-        // リンクの中身は proot が使う実体のパス（/data/data/…）で書かれている（ProotLauncher を参照）
-        val hostRoot = rootfs.canonicalPath
-        var count = 0
-        TarArchiveOutputStream(GZIPOutputStream(BufferedOutputStream(output, 1 shl 16), 1 shl 16)).use { tar ->
-            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
-            tar.setBigNumberMode(TarArchiveOutputStream.BIGNUMBER_POSIX)
-
-            val json = store.encode(config).toByteArray()
-            tar.putArchiveEntry(TarArchiveEntry(CONFIG_ENTRY).apply { size = json.size.toLong(); mode = "100644".toInt(8) })
-            tar.write(json)
-            tar.closeArchiveEntry()
-
-            fun walk(dir: File, prefix: String) {
-                val children = dir.listFiles() ?: return
-                for (child in children.sortedBy { it.name }) {
-                    val name = prefix + child.name
-                    val stat = runCatching { Os.lstat(child.path) }.getOrNull() ?: continue
-                    val mode = stat.st_mode and "7777".toInt(8)
-                    when {
-                        android.system.OsConstants.S_ISLNK(stat.st_mode) -> {
-                            val entry = TarArchiveEntry(name, TarConstants.LF_SYMLINK)
-                            entry.linkName = L2sLinks.toGuest(hostRoot, Os.readlink(child.path))
-                            tar.putArchiveEntry(entry)
-                            tar.closeArchiveEntry()
-                        }
-                        android.system.OsConstants.S_ISDIR(stat.st_mode) -> {
-                            tar.putArchiveEntry(TarArchiveEntry("$name/").apply {
-                                this.mode = "40000".toInt(8) or mode
-                                setModTime(stat.st_mtime * 1000)
-                            })
-                            tar.closeArchiveEntry()
-                            // 中身は端末のものを見せているだけなので書き出さない
-                            if (name !in SKIP_CONTENT_DIRS) walk(child, "$name/")
-                        }
-                        android.system.OsConstants.S_ISREG(stat.st_mode) -> {
-                            val entry = TarArchiveEntry(name).apply {
-                                size = stat.st_size
-                                this.mode = "100000".toInt(8) or mode
-                                setModTime(stat.st_mtime * 1000)
-                            }
-                            tar.putArchiveEntry(entry)
-                            child.inputStream().use { it.copyTo(tar, 1 shl 16) }
-                            tar.closeArchiveEntry()
-                        }
-                        else -> Unit // ソケットなどは書き出さない
-                    }
-                    if (++count % 500 == 0) onProgress(count)
-                }
+        guest.writeFile(id, "/$CONFIG_ENTRY", store.encode(config))
+        try {
+            GZIPOutputStream(BufferedOutputStream(output, 1 shl 16), 1 shl 16).use { gzip ->
+                guest.tar(id, "/", SKIP_CONTENT_DIRS, CountingOutputStream(gzip, 16L shl 20, onProgress))
             }
-            walk(rootfs, "")
-            tar.finish()
+        } finally {
+            withContext(NonCancellable) { runCatching { guest.remove(id, "/$CONFIG_ENTRY") } }
         }
-        onProgress(count)
     }
 
     /**
      * バックアップから新しいコンテナを作る。Pocket Linux 以外で作った rootfs の tar.gz も読める
      * （その場合は root でログインするコンテナになり、初期設定をやり直せる）。
+     * 1.x で書き出したものは所有者がすべて root なので、持ち主を直す。
      */
     suspend fun import(input: InputStream, fallbackName: String, onProgress: (Long) -> Unit): ContainerConfig =
         withContext(Dispatchers.IO) {
             val id = store.newId()
-            val rootfs = paths.rootfs(id)
             try {
                 val counting = CountingInputStream(BufferedInputStream(input, 1 shl 16), 4L shl 20, onProgress)
-                val hostRoot = rootfs.apply { mkdirs() }.canonicalPath
-                TarArchiveInputStream(GZIPInputStream(counting, 1 shl 16)).use { tar ->
-                    LayerExtractor(AndroidFileOps).extract(tar, rootfs) { L2sLinks.toHost(hostRoot, it) }
-                }
-                val configFile = File(rootfs, CONFIG_ENTRY)
-                val restored = configFile.takeIf { it.isFile }?.let { runCatching { store.decode(it.readText()) }.getOrNull() }
-                configFile.delete()
+                guest.untar(id, GZIPInputStream(counting, 1 shl 16))
+                val restored = guest.readFile(id, "/$CONFIG_ENTRY")?.let { runCatching { store.decode(it) }.getOrNull() }
+                runCatching { guest.remove(id, "/$CONFIG_ENTRY") }
 
                 val config = restored?.copy(id = id, name = restored.name + "（復元）", createdAt = System.currentTimeMillis())
                     ?: ContainerConfig(
@@ -109,16 +55,24 @@ class BackupManager(private val paths: Paths, private val store: ContainerStore)
                         user = null,
                         home = "/root",
                     )
+                if (restored != null && isFromLegacy(config)) containers.repairLegacy(config)
                 store.save(config)
                 config
             } catch (e: Throwable) {
                 runCatching { store.delete(id) }
+                withContext(NonCancellable) { runCatching { guest.deleteContainer(id) } }
                 throw e
             }
         }
 
+    /** 1.x のコンテナにはハードリンクの代わりのフォルダ（.l2s）がある */
+    private suspend fun isFromLegacy(config: ContainerConfig): Boolean =
+        guest.capture(GuestCommands.rootScript(config, "test -d /.l2s")).exit == 0
+
     companion object {
         const val CONFIG_ENTRY = ".pocket-linux-container.json"
-        private val SKIP_CONTENT_DIRS = setOf("proc", "sys", "dev", "tmp")
+
+        /** フォルダ自体は残して中身を入れない（中身は VM が見せているだけ） */
+        val SKIP_CONTENT_DIRS = listOf("/proc", "/sys", "/dev", "/tmp", "/run")
     }
 }

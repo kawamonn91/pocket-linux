@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.VIBRATE" />
-    <!-- コンテナの ~/storage から端末の共有ストレージ（Download など）を読み書きする（許可した場合のみ） -->
+    <!-- コンテナの ~/storage から端末の共有ストレージ（Download など）を読み書きする（許可した場合のみ。VM には 9p で見せる） -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
@@ -29,7 +29,7 @@
         <!--
           allowBackup=false: コンテナは数 GB になり、Android の自動バックアップの上限を超えるため。
           バックアップはアプリ内の「バックアップ」（tar.gz の書き出し）で行う。
-          extractNativeLibs: proot などの実行ファイルを nativeLibraryDir に展開させる（exec するため）。
+          extractNativeLibs: QEMU（libqemu.so）を nativeLibraryDir に展開させる（exec するため）。
         -->
 
         <activity

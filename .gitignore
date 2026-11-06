@@ -12,13 +12,12 @@ captures/
 *.keystore
 keystore.properties
 
-# 取得したパッケージの展開物（scripts/prepare-proot.sh で作り直せる）
-third_party/termux-debs/x/
-third_party/termux-debs/Packages-*
+# rclone のビルドに取ってきたソース（scripts/build-rclone.sh）
 third_party/rclone-build/
 
 # VM の生成物（vm/scripts/ で作り直せる。配布は GitHub Releases）
 vm/out/
+vm/prebuilt/
 vm/test/work/
 
 hs_err_pid*.log

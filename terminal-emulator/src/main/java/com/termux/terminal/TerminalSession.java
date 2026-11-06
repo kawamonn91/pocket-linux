@@ -33,6 +33,9 @@ public final class TerminalSession extends TerminalOutput {
     private static final int MSG_NEW_INPUT = 1;
     private static final int MSG_PROCESS_EXITED = 4;
 
+    /** Marks a running session in {@link #mShellPid} when there is no local process. */
+    private static final int BACKEND_PID = Integer.MAX_VALUE;
+
     public final String mHandle = UUID.randomUUID().toString();
 
     TerminalEmulator mEmulator;
@@ -76,6 +79,8 @@ public final class TerminalSession extends TerminalOutput {
     private final String[] mEnv;
     private final Integer mTranscriptRows;
 
+    /** If set, the session talks to this instead of a subprocess on a pty. */
+    private final TerminalBackend mBackend;
 
     private static final String LOG_TAG = "TerminalSession";
 
@@ -86,6 +91,18 @@ public final class TerminalSession extends TerminalOutput {
         this.mEnv = env;
         this.mTranscriptRows = transcriptRows;
         this.mClient = client;
+        this.mBackend = null;
+    }
+
+    /** A session attached to a {@link TerminalBackend}: no subprocess is created in this process. */
+    public TerminalSession(TerminalBackend backend, Integer transcriptRows, TerminalSessionClient client) {
+        this.mShellPath = null;
+        this.mCwd = null;
+        this.mArgs = null;
+        this.mEnv = null;
+        this.mTranscriptRows = transcriptRows;
+        this.mClient = client;
+        this.mBackend = backend;
     }
 
     /**
@@ -104,7 +121,11 @@ public final class TerminalSession extends TerminalOutput {
         if (mEmulator == null) {
             initializeEmulator(columns, rows, cellWidthPixels, cellHeightPixels);
         } else {
-            JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns, cellWidthPixels, cellHeightPixels);
+            if (mBackend != null) {
+                mBackend.resize(columns, rows);
+            } else {
+                JNI.setPtyWindowSize(mTerminalFileDescriptor, rows, columns, cellWidthPixels, cellHeightPixels);
+            }
             mEmulator.resize(columns, rows, cellWidthPixels, cellHeightPixels);
         }
     }
@@ -122,6 +143,11 @@ public final class TerminalSession extends TerminalOutput {
      */
     public void initializeEmulator(int columns, int rows, int cellWidthPixels, int cellHeightPixels) {
         mEmulator = new TerminalEmulator(this, columns, rows, cellWidthPixels, cellHeightPixels, mTranscriptRows, mClient);
+
+        if (mBackend != null) {
+            startBackend(columns, rows);
+            return;
+        }
 
         int[] processId = new int[1];
         mTerminalFileDescriptor = JNI.createSubprocess(mShellPath, mCwd, mArgs, mEnv, processId, rows, columns, cellWidthPixels, cellHeightPixels);
@@ -170,6 +196,39 @@ public final class TerminalSession extends TerminalOutput {
             }
         }.start();
 
+    }
+
+    private void startBackend(int columns, int rows) {
+        mShellPid = BACKEND_PID;
+        new Thread("TermSessionBackendWriter") {
+            @Override
+            public void run() {
+                final byte[] buffer = new byte[4096];
+                while (true) {
+                    int bytesToWrite = mTerminalToProcessIOQueue.read(buffer, true);
+                    if (bytesToWrite == -1) return;
+                    mBackend.write(buffer, 0, bytesToWrite);
+                }
+            }
+        }.start();
+        mBackend.start(columns, rows, this);
+    }
+
+    /** What the backend's process printed. Can be called from any thread; blocks while the terminal catches up. */
+    public void onBackendOutput(byte[] data, int length) {
+        int offset = 0;
+        // The main thread takes out at most its buffer size per message, so post one message per chunk.
+        while (offset < length) {
+            int chunk = Math.min(length - offset, 4096);
+            if (!mProcessToTerminalIOQueue.write(data, offset, chunk)) return;
+            mMainThreadHandler.sendEmptyMessage(MSG_NEW_INPUT);
+            offset += chunk;
+        }
+    }
+
+    /** The backend's process ended (exit code, or a negated signal). Can be called from any thread. */
+    public void onBackendExit(int exitCode) {
+        mMainThreadHandler.sendMessage(mMainThreadHandler.obtainMessage(MSG_PROCESS_EXITED, exitCode));
     }
 
     /** Write data to the shell process. */
@@ -232,6 +291,10 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Finish this terminal session by sending SIGKILL to the shell. */
     public void finishIfRunning() {
+        if (mBackend != null) {
+            if (isRunning()) mBackend.kill();
+            return;
+        }
         if (isRunning()) {
             try {
                 Os.kill(mShellPid, OsConstants.SIGKILL);
@@ -251,7 +314,7 @@ public final class TerminalSession extends TerminalOutput {
         // Stop the reader and writer threads, and close the I/O streams
         mTerminalToProcessIOQueue.close();
         mProcessToTerminalIOQueue.close();
-        JNI.close(mTerminalFileDescriptor);
+        if (mBackend == null) JNI.close(mTerminalFileDescriptor);
     }
 
     @Override
@@ -294,7 +357,7 @@ public final class TerminalSession extends TerminalOutput {
 
     /** Returns the shell's working directory or null if it was unavailable. */
     public String getCwd() {
-        if (mShellPid < 1) {
+        if (mBackend != null || mShellPid < 1) {
             return null;
         }
         try {

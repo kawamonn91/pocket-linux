@@ -49,6 +49,7 @@ import com.ttech.pocketlinux.AppSettings
 import com.ttech.pocketlinux.engine.ContainerConfig
 import com.ttech.pocketlinux.engine.ContainerManager
 import com.ttech.pocketlinux.ide.IdeServer
+import com.ttech.pocketlinux.vm.VmManager
 
 /** 設定画面の操作（実際の処理は MainActivity 側で行う） */
 interface SettingsActions {
@@ -58,6 +59,8 @@ interface SettingsActions {
     fun openInBrowser(url: String)
     fun requestStorageAccess()
     fun clearCache()
+    fun stopVm()
+    fun consoleLog(): String
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -66,6 +69,7 @@ fun SettingsScreen(
     settings: AppSettings.Values,
     containers: List<ContainerConfig>,
     ide: IdeServer.State,
+    vm: VmManager.Status,
     storageGranted: Boolean,
     cacheBytes: Long,
     addresses: List<Pair<String, String>>,
@@ -88,6 +92,7 @@ fun SettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            item { VmCard(settings, vm, actions) }
             item { IdeCard(settings, containers, ide, addresses, actions) }
             item {
                 Section("ターミナル") {
@@ -116,8 +121,8 @@ fun SettingsScreen(
                         Column(Modifier.weight(1f)) {
                             Text("端末のストレージ（~/storage）")
                             Text(
-                                if (storageGranted) "許可されています。コンテナの ~/storage から Download などを読み書きできます"
-                                else "許可すると、コンテナの ~/storage から端末の Download などを読み書きできます",
+                                if (storageGranted) "許可されています。コンテナの ~/storage から Download などを読み書きできます（許可した後に VM を起動したときから）"
+                                else "許可すると、コンテナの ~/storage から端末の Download などを読み書きできます（次に VM を起動したときから）",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -149,6 +154,68 @@ fun SettingsScreen(
 
     if (showLicenses) LicensesDialog(onDismiss = { showLicenses = false })
 }
+
+@Composable
+private fun VmCard(settings: AppSettings.Values, vm: VmManager.Status, actions: SettingsActions) {
+    var log by remember { mutableStateOf<String?>(null) }
+    Section("Linux の VM") {
+        val status = when (vm.state) {
+            VmManager.State.RUNNING -> "動いています（起動に %.1f 秒）".format(vm.bootMillis / 1000f)
+            VmManager.State.STARTING -> "起動しています"
+            VmManager.State.STOPPING -> "止めています"
+            VmManager.State.STOPPED -> vm.error?.let { "止まっています: $it" } ?: "止まっています（使うときに起動します）"
+        }
+        Text(status, style = MaterialTheme.typography.bodySmall,
+            color = if (vm.error != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+        ChoiceRow("メモリ", settings.vmMemoryMb, VM_MEMORY_CHOICES) { value -> actions.update { it.copy(vmMemoryMb = value) } }
+        ChoiceRow("CPU の数", settings.vmCpus, VM_CPU_CHOICES) { value -> actions.update { it.copy(vmCpus = value) } }
+        ChoiceRow(
+            "ディスクの上限",
+            settings.vmDiskGb,
+            VM_DISK_CHOICES.filter { it >= settings.vmDiskGb }.map { it to "$it GB" },
+        ) { value -> actions.update { it.copy(vmDiskGb = value) } }
+        Text(
+            "変更は次に VM を起動したときから効きます。ディスクは使った分だけ端末の容量を使い、上限は大きくできますが小さくはできません。",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Row {
+            TextButton(onClick = actions::stopVm, enabled = vm.state == VmManager.State.RUNNING) { Text("VM を止める") }
+            TextButton(onClick = { log = actions.consoleLog() }) { Text("起動ログ") }
+        }
+    }
+    log?.let { text ->
+        AlertDialog(
+            onDismissRequest = { log = null },
+            title = { Text("起動ログ") },
+            text = {
+                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState(Int.MAX_VALUE))) {
+                    Text(text.ifEmpty { "ログはまだありません" }, fontFamily = FontFamily.Monospace, fontSize = 11.sp)
+                }
+            },
+            confirmButton = { TextButton(onClick = { actions.copy(text) }) { Text("コピー") } },
+            dismissButton = { TextButton(onClick = { log = null }) { Text("閉じる") } },
+        )
+    }
+}
+
+@Composable
+private fun ChoiceRow(label: String, selected: Int, choices: List<Pair<Int, String>>, onPick: (Int) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f))
+        OutlinedButton(onClick = { open = true }) { Text(choices.firstOrNull { it.first == selected }?.second ?: "$selected") }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            choices.forEach { (value, text) ->
+                DropdownMenuItem(text = { Text(text) }, onClick = { open = false; onPick(value) })
+            }
+        }
+    }
+}
+
+private val VM_MEMORY_CHOICES = listOf(0 to "自動", 512 to "512 MB", 1024 to "1 GB", 2048 to "2 GB", 4096 to "4 GB")
+private val VM_CPU_CHOICES = listOf(0 to "自動", 1 to "1", 2 to "2", 4 to "4", 8 to "8")
+private val VM_DISK_CHOICES = listOf(8, 16, 32, 64, 128, 256, 512)
 
 @Composable
 private fun IdeCard(
@@ -287,21 +354,25 @@ private fun LicensesDialog(onDismiss: () -> Unit) {
     )
 }
 
-/** 同梱しているもの。ソースは各リポジトリで公開されている（GPL の proot は版も示す） */
+/** 同梱しているもの。GPL のものは版とソースの置き場所を示す（docs/vm-plan.md の 8 章） */
 private val LICENSES = """
     Pocket Linux には次のソフトウェアが含まれています。
 
-    ■ proot 5.1.107-101（Termux のビルド）
+    ■ QEMU 11.1.3
     GNU General Public License v2.0
-    ソース: https://github.com/termux/proot
+    ソース・ビルド手順・変更点: https://github.com/kawamonn91/pocket-linux/releases （vm/scripts/build-qemu.sh）
 
-    ■ talloc 2.5.0
-    GNU Lesser General Public License v3.0
-    ソース: https://www.samba.org/ftp/talloc/
+    ■ Linux 6.18.60
+    GNU General Public License v2.0
+    ソース・設定: https://github.com/kawamonn91/pocket-linux/releases （vm/scripts/build-kernel.sh）
 
-    ■ libandroid-shmem 0.7
-    BSD 3-Clause License
-    ソース: https://github.com/termux/libandroid-shmem
+    ■ GLib 2.90・libiconv 1.19（QEMU に静的にリンク）
+    GNU Lesser General Public License v2.1
+    ソース: https://github.com/kawamonn91/pocket-linux/releases
+
+    ■ libslirp 4.9・PCRE2 10.49・libffi 3.8・zlib 1.4（QEMU に静的にリンク）
+    BSD 3-Clause・MIT・zlib License
+    ソース: https://github.com/kawamonn91/pocket-linux/releases
 
     ■ Termux の terminal-emulator・terminal-view（Android Terminal Emulator 由来）
     Apache License 2.0

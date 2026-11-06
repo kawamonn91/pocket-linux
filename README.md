@@ -1,22 +1,23 @@
 # Pocket Linux
 
-Android デバイス上で動作する、root 不要の軽量 Linux コンテナ環境・ターミナルアプリケーションです。
+Android デバイス上で動作する、root 不要の Linux 環境・ターミナルアプリケーションです。アプリの中で軽量な VM（QEMU の TCG）を動かし、その中でコンテナを動かします。
 
 ## 特徴
 
-- **root 不要**: `proot`（Termux ビルド）エンジンにより、非 root の Android 環境でも安全に Linux コンテナを実行。
+- **root 不要で本物の Linux**: 自前のカーネルが動くので、名前空間・cgroup・mount・iptables・Docker・ハードリンク・`/proc` がすべて本物。
 - **完全な sudo サポート**: 一般ユーザー（`user`）環境からパスワードなしで `sudo` が動作。
 - **Docker Hub からの直接 pull**: `ubuntu:24.04` などの公式 OCI イメージを直接取得・展開。
 - **組み込みターミナル**: Termux-View ベースの仮想端末・拡張キーボードを搭載。
-- **常駐サービス**: フォアグラウンドサービスによる長時間のコンテナプロセス継続。
+- **常駐サービス**: フォアグラウンドサービスで VM を動かし続ける。誰も使わなくなると VM は自動で止まる。
 - **日本語対応**: 日本語入力・文字入力欄のサポート。
-- **Google ドライブと双方向に自動同期**: 選んだ Drive のフォルダを、コンテナの `~/drive/<名前>` と同期（rclone を同梱）。
+- **Google ドライブと双方向に自動同期**: 選んだ Drive のフォルダを、コンテナの `~/drive/<名前>` と同期（VM の中の rclone）。
 - **IDE の窓口**: コンテナの中で [pocket-dev](https://github.com/kawamonn91/pocket-dev) のサーバーを動かし、`~/drive` を編集・実行できる。
 
 ## 開発環境
 
 - **開発言語**: Kotlin / Jetpack Compose
 - **ビルドツール**: Gradle 9.7.1 / AGP 9.4.0 / NDK 27.1.12297006（端末ライブラリ `libtermux.so` のビルドに使う）
+- **VM の生成物**: カーネル・`system.erofs`・`libqemu.so` は GitHub Releases に置き、ビルドのときに `vm/artifacts.properties` の版と SHA-256 で取ってくる（`vm/` と [docs/vm-plan.md](docs/vm-plan.md)）
 - **対応 Android**: 8.0 以降（minSdk 26、targetSdk 36）
 - **アーキテクチャ**: ARM64 (`arm64-v8a`), x86_64
 
@@ -28,8 +29,8 @@ Android デバイス上で動作する、root 不要の軽量 Linux コンテナ
 
 生成された APK は `app/build/outputs/apk/debug/app-debug.apk` に出力されます。
 
-単体テストは `./gradlew :app:testDebugUnitTest` で実行します。PR では GitHub Actions で同じテスト・lint・ビルドが走り、通ると自動でマージされます（[docs/ci.md](docs/ci.md)）。同梱する proot（Termux のビルド）は `scripts/prepare-proot.sh` で作り直せます。
+単体テストは `./gradlew :app:testDebugUnitTest` で実行します。PR では GitHub Actions で同じテスト・lint・ビルドが走り、通ると自動でマージされます（[docs/ci.md](docs/ci.md)）。
 
 ## 開発の状況
 
-決定事項と進み具合は [docs/plan.md](docs/plan.md) にあります。同梱するもののライセンスは、アプリの「設定 → オープンソースのライセンス」と `third_party/` にあります。
+決定事項と進み具合は [docs/plan.md](docs/plan.md) と [docs/vm-plan.md](docs/vm-plan.md) にあります。アプリと VM の中のエージェントの約束事は [docs/vm-protocol.md](docs/vm-protocol.md) です。同梱するもののライセンスは、アプリの「設定 → オープンソースのライセンス」と `third_party/` にあります。

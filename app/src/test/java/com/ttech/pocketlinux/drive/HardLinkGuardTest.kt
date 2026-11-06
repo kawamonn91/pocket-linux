@@ -1,7 +1,5 @@
 package com.ttech.pocketlinux.drive
 
-import com.ttech.pocketlinux.engine.JvmFileOps
-import com.ttech.pocketlinux.engine.RootfsSetup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -71,20 +69,5 @@ class HardLinkGuardTest {
         assertEquals(0, HardLinkGuard.materialize(drive))
         assertTrue(Files.isSymbolicLink(normal.toPath()))
         assertTrue(Files.isSymbolicLink(broken.toPath()))
-    }
-
-    @Test
-    fun gitのハードリンクを止める設定を一度だけ足す() {
-        val rootfs = tmp.newFolder("rootfs")
-        val setup = RootfsSetup(JvmFileOps)
-        File(rootfs, "etc").mkdirs()
-        File(rootfs, "etc/gitconfig").writeText("[user]\n\tname = test\n")
-
-        setup.ensureGitConfig(rootfs)
-        setup.ensureGitConfig(rootfs)
-
-        val text = File(rootfs, "etc/gitconfig").readText()
-        assertTrue(text.startsWith("[user]\n\tname = test\n"))
-        assertEquals(1, Regex("createObject = rename").findAll(text).count())
     }
 }

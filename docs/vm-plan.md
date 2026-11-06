@@ -6,6 +6,30 @@
 そのため「6. 決めること」は推奨のとおりに決めた（proot は 2.0 で消す、Drive の同期はゲストの中で行う、生成物は GitHub Releases に置く）。
 速さの計測は Phase 5・6 の実機の確認で行う。
 
+## 進み具合
+
+| Phase | 状態 | メモ |
+|---|---|---|
+| 0 | 飛ばした | |
+| 1 ゲスト | 完了（PR #11） | CI の QEMU で、起動からコンテナの中の sudo・バックアップ・強制終了からの回復まで確かめている |
+| 2 QEMU | 完了（PR #12） | 依存を静的にリンクした 1 ファイル（約 14 MB） |
+| 3 アプリ | 完了 | エミュレーターで確認（下の「確認の記録」） |
+| 4 残りの機能 | 完了 | IDE・`xdg-open`・Drive（ゲストの中の rclone）・端末のストレージ（9p）・バックアップ・1.x からの移行 |
+| 5 軽量化と安定性 | ほぼ完了 | 自動停止（5 分）、zram、free page reporting、FITRIM、時計合わせ、ネットワークが変わったときの DNS の書き直し。**アプリ経由の名前解決はやっていない**（Private DNS に従わない。端末の DNS に直接問い合わせる） |
+| 6 公開 | 実機の確認待ち | proot は消した。版は 2.0.0 |
+| 7 AVF | 未定 | 実機が対応しているかを確かめてから |
+
+計画からの変更:
+
+- **proot との切り替えの隠し設定は作らなかった。** 両方を動かす抽象化のコストが高く、2.0 で proot を消すと決めたので、1 つの PR で VM に切り替えた。公開は手動なので main は壊れない
+- **`vm/` と `guest/`:** ゲスト一式は `vm/` に置いた（カーネル設定は `vm/kernel/`、エージェントは `vm/agent/`）
+- **カーネルなどは assets に入れ、初回の起動で展開する。** ゲストは常に arm64 なので、ABI ごとの jniLibs に入れると 2 倍になるため。`.gz` のアセットは AGP が勝手に展開するので `data.img.gzip` という名前で入れる
+- **1.x の移行はお知らせから利用者が始める。** 時間がかかり、途中は容量を 2 倍使うため。移すまで 1.x のコンテナは開けず、Drive の同期も止まる
+
+残っているリスク:
+
+- 端末の空き容量が尽きると、QEMU は VM を止める（`werror` の既定）。今は通知していない。ディスクの上限（既定 32 GB、設定で変えられる）を端末の空きより小さくしておくしかない
+
 ## 1. 結論
 
 - **うまくいく見込みは高い。** Android の普通のアプリ（root なし）から使える VM の方法は、事実上 **QEMU のソフトウェア CPU エミュレーション（TCG）** だけだが、これで Linux カーネルごと動かせる。Podroid（GPLv2）が同じ方式で、root なしの Alpine VM を Android で動かしている実例がある
@@ -252,6 +276,19 @@ main を常に公開できる状態に保つため、VM の方式は 2.0 まで�
 - 同梱する物: QEMU（GPLv2）、Linux カーネル（GPLv2）、busybox（GPLv2）、e2fsprogs（GPLv2）、glib・libslirp（LGPL・BSD 系）、rclone（MIT）
 - 配布するなら、対応するソースを渡せるようにする。ビルド手順・ソースの版と SHA-256・patch をリポジトリに置き、ソースの tar 一式を生成物と同じ GitHub Releases に置く。アプリの「オープンソースのライセンス」に追記する
 - Podroid（GPLv2）は設計の参考にする。コードを写す場合は、その部分が GPLv2 になる
+
+## 確認の記録
+
+### エミュレーター（x86_64 の QEMU で arm64 のゲスト。AVD `pocketlinux`、Android 16）
+
+2026-11-06 に確認:
+
+- **VM の起動**: `pocket-agent` が約 1.3 秒（`1327 ms`）で準備完了（`uname -rm` → `6.18.60-pocket aarch64`、`free -m` → 489 MB）
+- **コンテナの作成（`ubuntu:24.04`）**: イメージ取得・展開・`user` の作成・`sudo` の導入まで完了
+- **基本動作**: `id`（`uid=1001(user)`）、`sudo whoami`（`root`）、ハードリンク（`ln` でリンク数が 2 になる）、`sudo mount -t tmpfs`、DNS（`/etc/resolv.conf` に Android 側の DNS を反映）、`~/drive`・`~/storage` のシンボリックリンク
+- **`xdg-open`**: コンテナ内で `xdg-open https://example.com` を実行し、Android 側のブラウザ（Chrome）が開くことを確認
+- **Docker**: `apt-get install docker.io iptables` で導入し、`sudo dockerd` が `overlayfs`・`cgroup v2` で起動。`sudo docker run --rm hello-world` と `sudo docker run --rm alpine wget -qO- http://example.com`（コンテナ内からの外部通信）が通ることを確認
+- **1.x からの移行**: 1.x の設定・Drive フォルダの移行と、アーキテクチャ不一致（x86_64 の 1.x コンテナを arm64 ゲストに移したとき）のエラー表示（`exec format error`）を確認
 
 ## 参考
 

@@ -162,6 +162,8 @@ def test_container(vm, rootfs):
     r = vm.run("grep -E 'erofs|ext4|overlay|9p' /proc/filesystems | wc -l; test -e /sys/fs/cgroup/cgroup.controllers")
     check_exit("cgroup v2 が見える", r)
     check("カーネルが必要なファイルシステムを持つ", r.text.strip() == "4", r.text)
+    r = vm.run("grep -q zram0 /proc/swaps")
+    check_exit("zram が有効", r)
     r = vm.run("readlink /proc/self/fd/3 2>/dev/null; ls /proc/self/fd | tr '\\n' ' '")
     check("制御用の fd がコンテナに漏れない", "socket" not in r.text, r.text)
 

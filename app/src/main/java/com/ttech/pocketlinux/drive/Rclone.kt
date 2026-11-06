@@ -1,8 +1,13 @@
 package com.ttech.pocketlinux.drive
 
-import com.ttech.pocketlinux.engine.LaunchCommand
 import com.ttech.pocketlinux.engine.Paths
-import com.ttech.pocketlinux.engine.ProcessRunner
+import com.ttech.pocketlinux.vm.AgentChannel
+import com.ttech.pocketlinux.vm.Guest
+import com.ttech.pocketlinux.vm.GuestListener
+import com.ttech.pocketlinux.vm.GuestOutput
+import com.ttech.pocketlinux.vm.OpenRequest
+import com.ttech.pocketlinux.vm.QemuLauncher
+import com.ttech.pocketlinux.vm.VmManager
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
@@ -12,106 +17,111 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.io.IOException
 
-typealias Output = ProcessRunner.Output
-
 /**
- * 同梱の rclone（scripts/build-rclone.sh で作る Linux 版）を、アプリのプロセスから直接動かす（コンテナの外）。
- *
- * Android 上でそのまま動かすため、名前解決は [ConnectProxy]（HTTPS_PROXY）、証明書は Android の
- * 証明書フォルダ（SSL_CERT_DIR）で解決する。Google のログインは rclone の承認済みの仕組みを使う
- * （同意画面には「rclone」と出る）。
+ * VM の中の rclone（system.erofs に入っている）を動かす。設定は VM のデータ用ディスクに置く。
+ * Google のログインは rclone の承認済みの仕組みを使う（同意画面には「rclone」と出る）。
  */
-class Rclone(private val paths: Paths, private val proxy: ConnectProxy) {
+class Rclone(private val paths: Paths, private val vm: VmManager, private val guest: Guest) {
 
-    val available: Boolean get() = paths.rclone.isFile
+    /** ログインしたかの目印。設定は VM の中にあるので、これを見れば VM を起動しなくて済む */
+    private val loggedInMarker = File(paths.rcloneDir, "logged-in")
 
-    val configFile: File get() = File(paths.rcloneDir, "rclone.conf")
+    val isLoggedIn: Boolean get() = loggedInMarker.isFile || paths.legacyRcloneConfig.isFile
 
-    val isLoggedIn: Boolean
-        get() = configFile.isFile && configFile.readLines().any { it.trim() == "[$REMOTE]" }
-
-    fun command(args: List<String>): LaunchCommand {
-        val tmp = File(paths.cacheDir, "rclone-tmp").apply { mkdirs() }
-        return LaunchCommand(
-            executable = paths.rclone.path,
-            argv = listOf(paths.rclone.path) + args,
-            env = listOf(
-                "HOME=${paths.rcloneDir.path}",
-                "PATH=/system/bin",
-                "TMPDIR=${tmp.path}",
-                "RCLONE_CONFIG=${configFile.path}",
-                "RCLONE_CACHE_DIR=${File(paths.rcloneDir, "cache").path}",
-                "HTTPS_PROXY=${proxy.url}",
-                "NO_PROXY=127.0.0.1,localhost",
-                "SSL_CERT_DIR=$CERT_DIRS",
-            ),
-            cwd = paths.rcloneDir.path,
-        )
-    }
+    private fun request(args: List<String>) = OpenRequest(
+        op = "exec",
+        argv = listOf(RCLONE, "--config", GUEST_CONFIG, "--cache-dir", "$GUEST_DIR/cache") + args,
+        cwd = GUEST_DIR,
+    )
 
     /** 1行ずつ受け取りながら動かす（同期など）。終了コードを返す */
-    suspend fun run(args: List<String>, onLine: (String) -> Unit): Int = ProcessRunner.run(command(args), onLine)
+    suspend fun run(args: List<String>, onLine: (String) -> Unit): Int = guest.run(request(args), onLine)
 
     /** 標準出力と標準エラーを分けて受け取る（JSON を読むコマンド用） */
-    suspend fun capture(args: List<String>): Output = ProcessRunner.capture(command(args))
+    suspend fun capture(args: List<String>): GuestOutput = guest.capture(request(args))
 
     /**
      * Google でログインする。同意画面の URL を [openUrl] でブラウザに開き、同意が終わると
      * rclone が受け取ったトークンを設定ファイルに書く。トークンはログに出さない。
+     *
+     * ブラウザが開くのは端末の 127.0.0.1:53682 で、rclone は VM の中の 127.0.0.1 で待ち受ける。
+     * ログインの間だけ、QEMU のポート転送とエージェントの proxy でつなぐ。
      */
     suspend fun login(openUrl: (String) -> Unit, log: (String) -> Unit) {
-        val output = StringBuilder()
-        var opened = false
-        var inToken = false
-        val exit = run(listOf("authorize", "drive", "--auth-no-open-browser")) { line ->
-            if (!opened) AUTH_URL.find(line)?.let { opened = true; openUrl(it.value) }
-            output.appendLine(line)
-            when {
-                line.contains(TOKEN_BEGIN) -> inToken = true
-                line.contains(TOKEN_END) -> inToken = false
-                !inToken -> log(line)
+        val channel = vm.channel()
+        runCatching { vm.qmp.removeForward(LOCALHOST, AUTH_PORT) }
+        vm.qmp.addForward(LOCALHOST, AUTH_PORT)
+        val proxy: AgentChannel.GuestSession = channel.open(
+            OpenRequest(op = "proxy", listen = "${QemuLauncher.GUEST_ADDRESS}:$AUTH_PORT", target = "$LOCALHOST:$AUTH_PORT"),
+            object : GuestListener {},
+        )
+        try {
+            val output = StringBuilder()
+            var opened = false
+            var inToken = false
+            val exit = run(listOf("authorize", "drive", "--auth-no-open-browser")) { line ->
+                if (!opened) AUTH_URL.find(line)?.let { opened = true; openUrl(it.value) }
+                output.appendLine(line)
+                when {
+                    line.contains(TOKEN_BEGIN) -> inToken = true
+                    line.contains(TOKEN_END) -> inToken = false
+                    !inToken -> log(line)
+                }
             }
+            val token = parseToken(output.toString())
+                ?: throw IOException("ログインできませんでした（終了コード $exit）")
+            importConfig("[$REMOTE]\ntype = drive\nscope = drive\ntoken = $token\n")
+        } finally {
+            runCatching { proxy.close() }
+            runCatching { vm.qmp.removeForward(LOCALHOST, AUTH_PORT) }
         }
-        val token = parseToken(output.toString())
-            ?: throw IOException("ログインできませんでした（終了コード $exit）")
-        writeConfig(token)
     }
 
-    fun logout() {
-        configFile.delete()
+    /** 設定を VM に書いて、ログインした状態にする */
+    suspend fun importConfig(text: String) {
+        guest.writeFile(null, GUEST_CONFIG, text, mode = "600".toInt(8))
+        paths.rcloneDir.mkdirs()
+        loggedInMarker.writeText("")
+    }
+
+    suspend fun logout() {
+        loggedInMarker.delete()
+        paths.legacyRcloneConfig.delete()
+        guest.remove(null, GUEST_CONFIG)
     }
 
     /** Drive のフォルダの中のフォルダ名（[path] は Drive の中のパス。"" はマイドライブの直下） */
     suspend fun listFolders(path: String): List<String> {
         val result = capture(listOf("lsjson", remote(path), "--dirs-only", "--no-modtime", "--no-mimetype"))
         if (result.exit != 0) {
-            throw IOException(result.stderr.lineSequence().lastOrNull { it.isNotBlank() } ?: "フォルダの一覧を取得できません")
+            throw IOException(result.stderr.lineSequence().lastOrNull { it.isNotBlank() } ?: result.error ?: "フォルダの一覧を取得できません")
         }
         return parseFolderNames(result.stdout)
     }
 
-    private fun writeConfig(token: String) {
-        paths.rcloneDir.mkdirs()
-        val tmp = File(configFile.path + ".tmp")
-        tmp.writeText("[$REMOTE]\ntype = drive\nscope = drive\ntoken = $token\n")
-        if (!tmp.renameTo(configFile)) {
-            configFile.delete()
-            tmp.renameTo(configFile)
-        }
-    }
-
     companion object {
         const val REMOTE = "gdrive"
+        private const val RCLONE = "/usr/bin/rclone"
 
-        /** Android 14 からは証明書が Conscrypt の APEX にある。古い場所も並べる（Go は「:」区切りで全部読む） */
-        const val CERT_DIRS = "/apex/com.android.conscrypt/cacerts:/system/etc/security/cacerts"
+        /** 同期フォルダの VM の中の場所（コンテナの /mnt/drive） */
+        const val GUEST_DRIVE_DIR = "/data/drive"
+        /** 設定と bisync の作業フォルダの、VM の中の場所 */
+        const val GUEST_DIR = "/data/system/rclone"
+        private const val GUEST_CONFIG = "$GUEST_DIR/rclone.conf"
+        const val GUEST_EXCLUDES = "$GUEST_DIR/excludes.txt"
 
+        private const val LOCALHOST = "127.0.0.1"
+        private const val AUTH_PORT = 53682
         private val AUTH_URL = Regex("""http://127\.0\.0\.1:53682/auth\?state=[A-Za-z0-9_\-]+""")
         private const val TOKEN_BEGIN = "--->"
         private const val TOKEN_END = "<---End paste"
         private val json = Json { ignoreUnknownKeys = true }
 
         fun remote(path: String): String = "$REMOTE:" + path.trim('/')
+
+        fun guestLocalDir(localName: String): String = "$GUEST_DRIVE_DIR/$localName"
+
+        fun guestWorkDir(id: String): String = "$GUEST_DIR/bisync/$id"
 
         /** `rclone authorize` の出力から、貼り付け用のトークン（JSON）を取り出す */
         fun parseToken(output: String): String? {
@@ -129,15 +139,15 @@ class Rclone(private val paths: Paths, private val proxy: ConnectProxy) {
                 .sortedWith(String.CASE_INSENSITIVE_ORDER)
 
         /**
-         * Drive のフォルダと端末のフォルダを双方向に同期する `rclone bisync` の引数。
+         * Drive のフォルダと VM の中のフォルダを双方向に同期する `rclone bisync` の引数。
          * 両方で変わったファイルは新しいほうを残し、古いほうは番号を付けて残す。
-         * リンクは中身をたどって送る（コンテナ内でハードリンクを作るとリンクになるため）。
+         * リンクは中身をたどって送る。
          */
-        fun bisyncArgs(remotePath: String, localDir: File, workDir: File, excludeFile: File, resync: Boolean): List<String> =
+        fun bisyncArgs(remotePath: String, localDir: String, workDir: String, excludeFile: String, resync: Boolean): List<String> =
             buildList {
-                add("bisync"); add(remote(remotePath)); add(localDir.path)
-                add("--workdir"); add(workDir.path)
-                add("--exclude-from"); add(excludeFile.path)
+                add("bisync"); add(remote(remotePath)); add(localDir)
+                add("--workdir"); add(workDir)
+                add("--exclude-from"); add(excludeFile)
                 add("--resilient"); add("--recover")
                 add("--conflict-resolve"); add("newer")
                 add("--conflict-loser"); add("num")

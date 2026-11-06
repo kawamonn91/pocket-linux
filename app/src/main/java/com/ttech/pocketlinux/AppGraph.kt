@@ -2,22 +2,33 @@ package com.ttech.pocketlinux
 
 import android.app.Application
 import com.ttech.pocketlinux.bridge.UrlBridge
-import com.ttech.pocketlinux.drive.ConnectProxy
 import com.ttech.pocketlinux.drive.DriveSync
 import com.ttech.pocketlinux.drive.Rclone
 import com.ttech.pocketlinux.engine.BackupManager
 import com.ttech.pocketlinux.engine.ContainerManager
 import com.ttech.pocketlinux.engine.ContainerStore
 import com.ttech.pocketlinux.engine.HostEnvironment
+import com.ttech.pocketlinux.engine.LegacyMigration
 import com.ttech.pocketlinux.engine.Paths
-import com.ttech.pocketlinux.engine.ProotLauncher
 import com.ttech.pocketlinux.engine.RegistryClient
 import com.ttech.pocketlinux.ide.IdeServer
 import com.ttech.pocketlinux.service.ContainerService
 import com.ttech.pocketlinux.terminal.SessionManager
+import com.ttech.pocketlinux.vm.Guest
+import com.ttech.pocketlinux.vm.QemuLauncher
+import com.ttech.pocketlinux.vm.VmImages
+import com.ttech.pocketlinux.vm.VmManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
@@ -35,36 +46,52 @@ class AppGraph(val app: Application) {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
-
-    val store = ContainerStore(paths)
-    val launcher = ProotLauncher(paths)
-    val containers = ContainerManager(paths, store, RegistryClient(http), launcher, host)
-    val backups = BackupManager(paths, store)
-    val sessions = SessionManager(app, store, launcher, containers)
-    val tasks = TaskTracker()
-
-    /** Google ドライブとの同期に使う rclone（名前解決は端末内のプロキシ経由） */
-    val rclone = Rclone(paths, ConnectProxy())
     val activity = BackgroundActivity()
+    val tasks = TaskTracker()
 
     /** 画面が前面にあるか（裏にあるときはブラウザを直接開けない） */
     @Volatile
     var isForeground = false
 
-    val urlBridge = UrlBridge(app, paths.openUrlDir) { isForeground }
+    val urlBridge = UrlBridge(app) { isForeground }
+
+    /** Linux の VM（QEMU の子プロセス 1 つ）。コンテナはすべてこの中で動く */
+    val vm = VmManager(
+        paths = paths,
+        options = ::vmOptions,
+        onEvent = ::onGuestEvent,
+        prepareImages = { VmImages.extract(app.assets, paths) },
+        keepAlive = {
+            // サービスが見る前に立てておく（立っていないと、サービスがすぐ止まってしまう）
+            activity.update { it.copy(vmRunning = true) }
+            ContainerService.ensureRunning(app)
+        },
+    )
+    val guest = Guest(vm)
+
+    val store = ContainerStore(paths)
+    val containers = ContainerManager(paths, store, RegistryClient(http), guest, host)
+    val backups = BackupManager(store, guest, containers)
+    val sessions = SessionManager(app, store, vm, containers, scope)
+
+    /** Google ドライブとの同期に使う rclone（VM の中で動く） */
+    val rclone = Rclone(paths, vm, guest)
+    val legacy = LegacyMigration(paths, store, guest, containers, rclone)
 
     /** Google ドライブとの双方向の自動同期（PocketLinuxApp で start する） */
-    val drive = DriveSync(paths, rclone, scope, activity, host::isOnline) { ContainerService.ensureRunning(app) }
+    val drive = DriveSync(paths, rclone, vm, guest, scope, activity, host::isOnline, legacy::pending) {
+        ContainerService.ensureRunning(app)
+    }
 
     /** IDE の窓口（pocket-dev のサーバー）。設定に合わせて applyIdeSettings で動かす・止める */
-    val ide = IdeServer(paths, app.assets, launcher, containers, scope, activity) { ContainerService.ensureRunning(app) }
+    val ide = IdeServer(app.assets, vm, guest, scope, activity) { ContainerService.ensureRunning(app) }
     private var appliedIde: List<Any?>? = null
 
     /** IDE の設定を反映する。動かす設定で、使えるコンテナがあれば起動し、設定が変わっていれば起動し直す */
     @Synchronized
     fun applyIdeSettings() {
         val values = settings.current
-        val container = store.all.value.filter { it.setupDone }.let { list ->
+        val container = store.all.value.filter { it.setupDone && !store.isLegacy(it.id) }.let { list ->
             list.firstOrNull { it.id == values.ideContainerId } ?: list.firstOrNull()
         }
         if (!values.ideEnabled || container == null) {
@@ -78,7 +105,59 @@ class AppGraph(val app: Application) {
         ide.start(container, values.idePort, values.ideToken, values.ideAllowLan)
     }
 
+    private fun vmOptions(): VmManager.Options {
+        val values = settings.current
+        return VmManager.Options(
+            memoryMb = values.vmMemoryMb.takeIf { it > 0 } ?: QemuLauncher.defaultMemoryMb(host.totalRamBytes()),
+            cpus = values.vmCpus.takeIf { it > 0 } ?: QemuLauncher.defaultCpus(Runtime.getRuntime().availableProcessors()),
+            diskBytes = values.vmDiskGb.toLong() shl 30,
+            dnsServers = host.guestDnsServers(),
+            storage = STORAGE_DIR.takeIf { host.hasStorageAccess() },
+        )
+    }
+
+    private fun onGuestEvent(type: String, body: JsonObject) {
+        when (type) {
+            "open-url" -> body["url"]?.jsonPrimitive?.content?.let(urlBridge::onGuestRequest)
+        }
+    }
+
+    /** VM の状態に合わせて周りを動かす（PocketLinuxApp で呼ぶ） */
+    fun startVmWatchers() {
+        host.onNetworkChanged { guest.updateDns(host.guestDnsServers()) }
+        activity.onStopAll { scope.launch { vm.shutdown() } }
+        scope.launch {
+            vm.status.map { it.state }.distinctUntilChanged().collect { state ->
+                when (state) {
+                    VmManager.State.RUNNING -> {
+                        activity.update { it.copy(vmRunning = true) }
+                        drive.onVmRunning()
+                    }
+                    VmManager.State.STOPPED -> {
+                        activity.update { it.copy(vmRunning = false) }
+                        drive.onVmStopped()
+                    }
+                    else -> Unit
+                }
+            }
+        }
+        // 誰も使っていない VM は、しばらくしたら止める（電池とメモリのため。次に使うときに起動し直す）
+        scope.launch {
+            combine(vm.status, sessions.sessions, sessions.revision, tasks.tasks, activity.state) { status, _, _, _, act ->
+                status.state == VmManager.State.RUNNING && sessions.runningCount() == 0 && tasks.runningCount == 0 && !act.busy
+            }.distinctUntilChanged().collectLatest { idle ->
+                if (idle) {
+                    delay(VM_IDLE_STOP_MS)
+                    vm.shutdown()
+                }
+            }
+        }
+    }
+
     companion object {
+        private const val STORAGE_DIR = "/storage/emulated/0"
+        private const val VM_IDLE_STOP_MS = 5 * 60_000L
+
         lateinit var instance: AppGraph
             private set
 

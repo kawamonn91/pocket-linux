@@ -33,6 +33,7 @@ import com.ttech.pocketlinux.ui.drive.DriveScreen
 import com.ttech.pocketlinux.terminal.Clipboard
 import com.ttech.pocketlinux.ui.settings.SettingsActions
 import com.ttech.pocketlinux.ui.settings.SettingsScreen
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -51,6 +52,7 @@ class MainActivity : ComponentActivity() {
     private var screen by mutableStateOf<Screen>(Screen.Home)
     private var noticeVersion by mutableStateOf(0)
     private var pendingBackup: ContainerConfig? = null
+    private var migrating by mutableStateOf(false)
 
     private lateinit var controller: TerminalController
 
@@ -86,6 +88,8 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         graph.isForeground = true
         noticeVersion++
+        // スリープの間は VM の時計が遅れる（エージェントも 30 秒おきに合わせるが、開いたらすぐ合うように）
+        graph.guest.updateClock(System.currentTimeMillis())
         graph.drive.onForeground()
     }
 
@@ -108,6 +112,7 @@ class MainActivity : ComponentActivity() {
         val settings by graph.settings.values.collectAsState()
         val drive by graph.drive.state.collectAsState()
         val ide by graph.ide.state.collectAsState()
+        val vm by graph.vm.status.collectAsState()
         val notices = remember(noticeVersion) { buildNotices() }
 
         when (val current = screen) {
@@ -115,6 +120,7 @@ class MainActivity : ComponentActivity() {
                 containers = containers,
                 tasks = tasks,
                 sessionCounts = sessions.filter { !it.finished }.groupingBy { it.containerId }.eachCount(),
+                legacyIds = remember(containers, noticeVersion) { containers.filter { graph.store.isLegacy(it.id) }.map { it.id }.toSet() },
                 notices = notices,
                 actions = homeActions,
             )
@@ -135,6 +141,7 @@ class MainActivity : ComponentActivity() {
                 settings = settings,
                 containers = containers,
                 ide = ide,
+                vm = vm,
                 // 設定アプリから戻ったとき（onResume）にも読み直す
                 storageGranted = remember(noticeVersion) { graph.host.hasStorageAccess() },
                 cacheBytes = remember(noticeVersion) { graph.containers.cacheSize() },
@@ -158,6 +165,7 @@ class MainActivity : ComponentActivity() {
 
         override fun openShell(containerId: String, asRoot: Boolean) {
             val config = graph.store.load(containerId) ?: return
+            if (refuseLegacy(containerId)) return
             if (!config.setupDone) {
                 toast("初期設定が終わっていません。メニューの「初期設定をやり直す」を実行してください")
                 return
@@ -169,6 +177,7 @@ class MainActivity : ComponentActivity() {
 
         override fun rerunSetup(containerId: String) {
             val config = graph.store.load(containerId) ?: return
+            if (refuseLegacy(containerId)) return
             ContainerService.ensureRunning(this@MainActivity)
             graph.tasks.start(graph.scope, "初期設定: ${config.name}") {
                 val updated = graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
@@ -185,6 +194,7 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun backup(container: ContainerConfig) {
+            if (refuseLegacy(container.id)) return
             pendingBackup = container
             val date = SimpleDateFormat("yyyyMMdd", Locale.JAPAN).format(Date())
             val safeName = container.name.replace(Regex("[^\\p{L}\\p{N}._-]+"), "_")
@@ -211,12 +221,36 @@ class MainActivity : ComponentActivity() {
         override fun openSettings() { screen = Screen.Settings }
     }
 
+    /** 1.x のコンテナは、VM に移すまで開けない */
+    private fun refuseLegacy(containerId: String): Boolean {
+        if (!graph.store.isLegacy(containerId)) return false
+        toast("前の版のコンテナです。トップ画面のお知らせから移してください")
+        return true
+    }
+
+    private fun startMigration() {
+        migrating = true
+        ContainerService.ensureRunning(this)
+        graph.tasks.start(graph.scope, "前の版のデータを移す") {
+            try {
+                progress("Linux を起動しています")
+                graph.legacy.migrateAll({ progress(it) }) { log(it) }
+                graph.drive.onMigrated()
+                graph.applyIdeSettings()
+                "移し終えました"
+            } finally {
+                migrating = false
+                noticeVersion++
+            }
+        }
+    }
+
     private fun startBackup(container: ContainerConfig, uri: Uri) {
         ContainerService.ensureRunning(this)
         graph.tasks.start(graph.scope, "バックアップ: ${container.name}") {
             val output = contentResolver.openOutputStream(uri) ?: error("保存先を開けません")
             output.use { stream ->
-                graph.backups.export(container.id, stream) { count -> progress("書き出し中（$count ファイル）") }
+                graph.backups.export(container.id, stream) { bytes -> progress("書き出し中（${ContainerManager.formatBytes(bytes)}）") }
             }
             "書き出しました"
         }
@@ -267,6 +301,12 @@ class MainActivity : ComponentActivity() {
             graph.containers.clearCache()
             noticeVersion++
         }
+
+        override fun stopVm() {
+            graph.scope.launch { graph.vm.shutdown() }
+        }
+
+        override fun consoleLog(): String = graph.vm.consoleLog()
     }
 
     // ------------------------------------------------------------ Google ドライブ
@@ -348,24 +388,19 @@ class MainActivity : ComponentActivity() {
             add(Notice(
                 id = "notification",
                 title = "通知を許可してください",
-                body = "裏でコンテナを動かし続けるために、実行中の通知を出します。ブラウザで開く依頼（Claude Code のログインなど）も通知で届きます。",
+                body = "裏で Linux を動かし続けるために、実行中の通知を出します。ブラウザで開く依頼（Claude Code のログインなど）も通知で届きます。",
                 actionLabel = "許可する",
                 onAction = { notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS) },
             ))
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !ChildProcessGuide.isDismissed(this@MainActivity)) {
+        if (!migrating && graph.legacy.pending()) {
             add(Notice(
-                id = "phantom",
-                title = "子プロセスの制限を外してください（Android 12 以降）",
-                body = ChildProcessGuide.message(),
-                actionLabel = if (Build.VERSION.SDK_INT >= 34) "開発者向けオプションを開く" else "表示しない",
-                onAction = {
-                    if (Build.VERSION.SDK_INT >= 34) {
-                        runCatching { startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)) }
-                    }
-                    ChildProcessGuide.dismiss(this@MainActivity)
-                    noticeVersion++
-                },
+                id = "legacy",
+                title = "前の版のデータを移してください",
+                body = "2.0 からコンテナは Linux の VM の中で動きます。前の版で作ったコンテナと Drive の同期フォルダは、VM に移すと使えるようになります。" +
+                    "大きさによって数分〜数十分かかり、終わるまでは端末の空き容量を余分に使います。",
+                actionLabel = "移す",
+                onAction = { startMigration() },
             ))
         }
     }

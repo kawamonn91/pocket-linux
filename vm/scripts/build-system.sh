@@ -33,7 +33,7 @@ mkdir -p "$root"/{sbin,usr/bin,etc/ssl/certs,dev,proc,sys,run,tmp,data,mnt/stora
 install -m 755 "$root/sbin/pocket-agent" "$OUT/pocket-agent"
 
 # rclone（scripts/build-rclone.sh で作った Linux 版をそのまま使う）
-install -m 755 app/src/main/jniLibs/arm64-v8a/librclone.so "$root/usr/bin/rclone"
+install -m 755 vm/rclone-arm64 "$root/usr/bin/rclone"
 
 # CA 証明書（Mozilla の一覧。curl が配っているもの）
 ca="$DL/cacert-$CACERT_VERSION.pem"

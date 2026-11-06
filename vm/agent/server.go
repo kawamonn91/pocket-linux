@@ -431,6 +431,7 @@ func (s *server) deleteContainer(ch uint32, req openRequest) {
 		s.fail(ch, err)
 		return
 	}
+	go trimData()
 	s.exit(ch, exitMessage{})
 }
 

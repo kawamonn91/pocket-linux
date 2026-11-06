@@ -1,21 +1,24 @@
 package com.ttech.pocketlinux.engine
 
+import com.ttech.pocketlinux.vm.Guest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
+import java.io.InputStream
+import java.util.zip.GZIPInputStream
 
-/** コンテナの作成・初期設定・削除 */
+/** コンテナの作成・初期設定・削除。中身は VM の中にあり、端末側に残るのは設定とレイヤーのキャッシュだけ */
 class ContainerManager(
     private val paths: Paths,
     private val store: ContainerStore,
     private val registry: RegistryClient,
-    private val launcher: ProotLauncher,
+    private val guest: Guest,
     private val host: HostEnvironment,
-    private val ops: FileOps = AndroidFileOps,
 ) {
-    private val extractor = LayerExtractor(ops)
-    private val setup = RootfsSetup(ops)
+    private val setup = ContainerSetup(guest)
 
     /** 作成の進み具合（label: 何をしているか、fraction: 0〜1。分からなければ null） */
     fun interface ProgressListener {
@@ -32,7 +35,8 @@ class ContainerManager(
         paths.ensureBaseDirs()
         val ref = ImageRef.parse(imageInput)
         progress.onProgress("イメージの情報を取得しています", null)
-        val resolved = registry.resolve(ref, host.platform())
+        // VM の中はどの端末でも arm64
+        val resolved = registry.resolve(ref, Platform.GUEST)
         log("${ref.displayName}（${resolved.layers.size} レイヤー、${formatBytes(resolved.layers.sumOf { it.size })}）")
 
         val id = store.newId()
@@ -43,12 +47,19 @@ class ContainerManager(
                     progress.onProgress("ダウンロード中（${index + 1}/$count）", if (total > 0) done.toFloat() / total else null)
                 }
             }
-            val rootfs = paths.rootfs(id)
+            progress.onProgress("Linux を起動しています", null)
+            guest.ensureRunning()
             resolved.layers.forEachIndexed { index, layer ->
-                val result = extractor.extract(blobFile(layer), layer.isGzip, rootfs) { done, total ->
-                    progress.onProgress("展開中（${index + 1}/$count）", if (total > 0) done.toFloat() / total else null)
+                val archive = blobFile(layer)
+                val total = archive.length()
+                FileInputStream(archive).use { fileIn ->
+                    val counting = CountingInputStream(BufferedInputStream(fileIn, 1 shl 16), 512L * 1024) { read ->
+                        progress.onProgress("展開中（${index + 1}/$count）", if (total > 0) read.toFloat() / total else null)
+                    }
+                    // gzip は端末側で解く（VM の中で解くより何倍も速い）
+                    val tar: InputStream = if (layer.isGzip) GZIPInputStream(counting, 1 shl 16) else counting
+                    guest.untar(id, tar)
                 }
-                if (result.skipped > 0) log("レイヤー ${index + 1}: ${result.skipped} 件のデバイスファイルなどを飛ばしました")
             }
 
             val config = ContainerConfig(
@@ -64,6 +75,7 @@ class ContainerManager(
             runSetup(config, installTools, progress, log)
         } catch (e: Throwable) {
             runCatching { store.delete(id) }
+            runCatching { withContext(kotlinx.coroutines.NonCancellable) { guest.deleteContainer(id) } }
             throw e
         }
     }
@@ -78,17 +90,14 @@ class ContainerManager(
         progress: ProgressListener,
         log: (String) -> Unit,
     ): ContainerConfig = withContext(Dispatchers.IO) {
-        val rootfs = paths.rootfs(config.id)
         val base = config.copy(user = ContainerConfig.DEFAULT_USER, home = "/home/${ContainerConfig.DEFAULT_USER}")
-        setup.prepareBase(rootfs, base, host.dnsServers())
+        setup.prepareBase(base)
 
         progress.onProgress(if (installTools) "sudo とよく使うツールを入れています" else "sudo を入れています", null)
-        val command = launcher.exec(base, RootfsSetup.packageInstallScript(installTools), asRoot = true, options())
-        val exit = ProcessRunner.run(command, log)
-        val sudoOk = exit == 0 && listOf("usr/bin/sudo", "bin/sudo").any { File(rootfs, it).exists() }
+        val exit = setup.installPackages(base, installTools, log)
 
-        val updated = if (sudoOk) {
-            setup.createUser(rootfs, base, host.groupIds())
+        val updated = if (exit == 0) {
+            setup.createUser(base)
             base.copy(setupDone = true, sudoInstalled = true)
         } else {
             log("sudo を入れられませんでした（終了コード $exit）。このコンテナは root でログインします。")
@@ -99,34 +108,25 @@ class ContainerManager(
         updated
     }
 
-    fun options(): LaunchOptions = LaunchOptions(
-        bindStorage = host.hasStorageAccess(),
-        fakeProc = FakeProc.prepare(paths.fakeProcDir),
-    )
+    /** 1.x の中身（移行・古いバックアップの復元）を VM で使えるように直す */
+    suspend fun repairLegacy(config: ContainerConfig) = setup.repairLegacy(config)
 
-    /** コンテナを開く前に、その時点の DNS を書き込む */
-    fun beforeLaunch(config: ContainerConfig) {
-        runCatching { setup.writeResolvConf(paths.rootfs(config.id), host.dnsServers()) }
-        // 前の版で作ったコンテナにも、git の設定を足す
-        runCatching { setup.ensureGitConfig(paths.rootfs(config.id)) }
+    /** コンテナを開く前に、その時点の DNS を VM に教える（VM が動いていれば） */
+    fun beforeLaunch() {
+        guest.updateDns(host.guestDnsServers())
     }
 
-    suspend fun delete(id: String) = withContext(Dispatchers.IO) { store.delete(id) }
+    suspend fun delete(id: String) = withContext(Dispatchers.IO) {
+        val legacy = store.isLegacy(id)
+        store.delete(id)
+        if (!legacy) guest.deleteContainer(id)
+    }
 
     /** pull したレイヤーのキャッシュの合計サイズ */
     fun cacheSize(): Long = paths.blobsDir.listFiles().orEmpty().sumOf { it.length() }
 
     fun clearCache() {
         paths.blobsDir.listFiles().orEmpty().forEach { it.delete() }
-    }
-
-    /** コンテナの使用量（リンクはたどらない） */
-    suspend fun diskUsage(id: String): Long = withContext(Dispatchers.IO) { sizeOf(paths.containerDir(id)) }
-
-    private fun sizeOf(file: File): Long {
-        if (ops.isSymlink(file)) return 0
-        if (file.isFile) return file.length()
-        return file.listFiles().orEmpty().sumOf { sizeOf(it) }
     }
 
     private fun blobFile(layer: Layer) = File(paths.blobsDir, layer.digest.removePrefix("sha256:"))

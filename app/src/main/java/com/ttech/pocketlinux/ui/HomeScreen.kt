@@ -90,6 +90,7 @@ fun HomeScreen(
     containers: List<ContainerConfig>,
     tasks: List<TaskTracker.Task>,
     sessionCounts: Map<String, Int>,
+    legacyIds: Set<String>,
     notices: List<Notice>,
     actions: HomeActions,
 ) {
@@ -134,7 +135,7 @@ fun HomeScreen(
                 item { EmptyState(onCreate = { showCreate = true }) }
             }
             items(containers, key = { it.id }) { container ->
-                ContainerCard(container, sessionCounts[container.id] ?: 0, actions)
+                ContainerCard(container, sessionCounts[container.id] ?: 0, container.id in legacyIds, actions)
             }
         }
     }
@@ -150,7 +151,7 @@ fun HomeScreen(
     }
 }
 
-/** 画面上部に出すお知らせ（通知の許可・子プロセスの制限など） */
+/** 画面上部に出すお知らせ（通知の許可・前の版のデータの移行など） */
 data class Notice(val id: String, val title: String, val body: String, val actionLabel: String? = null, val onAction: (() -> Unit)? = null)
 
 @Composable
@@ -173,7 +174,7 @@ private fun EmptyState(onCreate: () -> Unit) {
             Text("コンテナがまだありません", style = MaterialTheme.typography.titleMedium)
             Text(
                 "Docker のイメージ（ubuntu:24.04 など）から、この端末の中に Linux の環境を作ります。" +
-                    "root 化は不要で、中では sudo apt install が使えます。",
+                    "root 化は不要で、Linux の VM の中で動くので、sudo apt install も Docker も使えます。",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
@@ -234,7 +235,7 @@ private fun TaskCard(task: TaskTracker.Task, onCancel: () -> Unit, onDismiss: ()
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ContainerCard(container: ContainerConfig, sessions: Int, actions: HomeActions) {
+private fun ContainerCard(container: ContainerConfig, sessions: Int, legacy: Boolean, actions: HomeActions) {
     var menuOpen by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf<String?>(null) }
     val created = remember(container.createdAt) {
@@ -263,6 +264,7 @@ private fun ContainerCard(container: ContainerConfig, sessions: Int, actions: Ho
                 }
             }
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (legacy) AssistChip(onClick = {}, label = { Text("前の版のコンテナ（移すと使えます）") })
                 if (container.user != null) {
                     AssistChip(onClick = {}, label = { Text("${container.user}・sudo 可") })
                 } else {

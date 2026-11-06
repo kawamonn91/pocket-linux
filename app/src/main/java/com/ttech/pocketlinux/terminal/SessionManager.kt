@@ -7,8 +7,11 @@ import com.termux.terminal.TerminalSessionClient
 import com.ttech.pocketlinux.engine.ContainerConfig
 import com.ttech.pocketlinux.engine.ContainerManager
 import com.ttech.pocketlinux.engine.ContainerStore
-import com.ttech.pocketlinux.engine.LaunchCommand
-import com.ttech.pocketlinux.engine.ProotLauncher
+import com.ttech.pocketlinux.vm.GuestCommands
+import com.ttech.pocketlinux.vm.OpenRequest
+import com.ttech.pocketlinux.vm.VmManager
+import com.ttech.pocketlinux.vm.VmTerminalBackend
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,8 +53,9 @@ class TermSession(
 class SessionManager(
     private val context: Context,
     private val store: ContainerStore,
-    private val launcher: ProotLauncher,
+    private val vm: VmManager,
     private val manager: ContainerManager,
+    private val scope: CoroutineScope,
 ) : TerminalSessionClient {
 
     /** 画面側への通知（表示中のセッションの描画更新など） */
@@ -74,8 +78,8 @@ class SessionManager(
     fun openShell(containerId: String, asRoot: Boolean = false): TermSession? {
         val config = store.load(containerId) ?: return null
         val isFirst = _sessions.value.none { it.containerId == containerId && !it.finished }
-        manager.beforeLaunch(config)
-        val session = create(config, asRoot, TermSession.Kind.SHELL, launcher.login(config, asRoot, manager.options()))
+        manager.beforeLaunch()
+        val session = create(config, asRoot, TermSession.Kind.SHELL, GuestCommands.login(config, asRoot))
         if (isFirst) startAutostart(config)
         return session
     }
@@ -84,21 +88,13 @@ class SessionManager(
     private fun startAutostart(config: ContainerConfig) {
         if (!config.autostartEnabled || config.autostartCommand.isBlank()) return
         if (_sessions.value.any { it.containerId == config.id && it.kind == TermSession.Kind.AUTOSTART && !it.finished }) return
-        val command = launcher.exec(config, config.autostartCommand, asRoot = false, manager.options())
-        val session = create(config, false, TermSession.Kind.AUTOSTART, command)
+        val session = create(config, false, TermSession.Kind.AUTOSTART, GuestCommands.exec(config, config.autostartCommand, asRoot = false))
         // 画面に出していなくてもプロセスを始める（大きさは表示したときに合わせ直される）
         session.terminal.updateSize(100, 30, 12, 24)
     }
 
-    private fun create(config: ContainerConfig, asRoot: Boolean, kind: TermSession.Kind, command: LaunchCommand): TermSession {
-        val terminal = TerminalSession(
-            command.executable,
-            command.cwd,
-            command.argv.toTypedArray(),
-            command.env.toTypedArray(),
-            TRANSCRIPT_ROWS,
-            this,
-        )
+    private fun create(config: ContainerConfig, asRoot: Boolean, kind: TermSession.Kind, command: OpenRequest): TermSession {
+        val terminal = TerminalSession(VmTerminalBackend(vm, scope, command), TRANSCRIPT_ROWS, this)
         val session = TermSession(nextId++, config.id, config.name, asRoot, kind, terminal)
         _sessions.update { it + session }
         return session

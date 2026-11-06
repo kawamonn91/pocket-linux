@@ -6,6 +6,7 @@ class PocketLinuxApp : Application() {
     override fun onCreate() {
         super.onCreate()
         AppGraph.init(this)
+        AppGraph.instance.startVmWatchers()
         AppGraph.instance.drive.start()
         AppGraph.instance.applyIdeSettings()
         Notifications.createChannels(this)

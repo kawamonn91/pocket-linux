@@ -77,6 +77,13 @@ class ContainerStore(private val paths: Paths) {
 
     fun newId(): String = UUID.randomUUID().toString().substring(0, 8)
 
+    /** 端末側の状態が変わったとき（移行が終わったときなど）に一覧を作り直す */
+    fun refreshList() = refresh()
+
+    /** 1.x（proot）で作ったまま、VM へ移していないコンテナか */
+    fun isLegacy(id: String): Boolean = paths.legacyRootfs(id).isDirectory
+
+    /** 端末側の設定を消す（中身は VM の中にある。ContainerManager.delete が消す） */
     fun delete(id: String) {
         // 先に設定を消して一覧から外し、時間のかかる中身の削除はその後に行う
         paths.containerConfig(id).delete()

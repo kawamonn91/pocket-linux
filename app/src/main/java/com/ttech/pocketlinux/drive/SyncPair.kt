@@ -5,7 +5,7 @@ import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.io.File
 
-/** Drive のフォルダと、端末（コンテナの ~/drive/<名前>）のフォルダの組 */
+/** Drive のフォルダと、VM の中（コンテナの ~/drive/<名前>）のフォルダの組 */
 @Serializable
 data class SyncPair(
     val id: String,
@@ -49,7 +49,6 @@ object Excludes {
         |venv/**
         |__pycache__/**
         |.gradle/**
-        |.l2s.*
         |.DS_Store
         |""".trimMargin()
 

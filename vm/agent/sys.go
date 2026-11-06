@@ -15,6 +15,7 @@ const (
 	ioctlBLKGETSIZE64 = 0x80081272
 	ioctlRTCRDTIME    = 0x80247009
 	ioctlEXT4RESIZEFS = 0x40086610
+	ioctlFITRIM       = 0xc0185879
 	atSymlinkNoFollow = 0x100
 )
 

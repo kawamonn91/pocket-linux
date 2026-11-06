@@ -63,6 +63,7 @@ class AgentChannel(
 ) {
     private val reader = DataInputStream(input)
     private val writer = DataOutputStream(output)
+    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
     private val lock = Object()
     private val urgent = ArrayDeque<ByteArray>()
     private val bulk = ArrayDeque<ByteArray>()

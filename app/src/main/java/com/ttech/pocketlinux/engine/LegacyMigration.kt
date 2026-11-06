@@ -80,7 +80,7 @@ class LegacyMigration(
             throw e
         }
         AndroidFileOps.deleteTree(rootfs)
-        store.refreshList()
+        store.refresh()
     }
 
     /** 端末のフォルダを tar にして、ゲストに展開する */

@@ -94,7 +94,7 @@ class Rclone(private val paths: Paths, private val vm: VmManager, private val gu
     suspend fun listFolders(path: String): List<String> {
         val result = capture(listOf("lsjson", remote(path), "--dirs-only", "--no-modtime", "--no-mimetype"))
         if (result.exit != 0) {
-            throw IOException(result.stderr.lineSequence().lastOrNull { it.isNotBlank() } ?: result.error ?: "フォルダの一覧を取得できません")
+            throw IOException(result.failureReason())
         }
         return parseFolderNames(result.stdout)
     }

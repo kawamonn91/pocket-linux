@@ -159,6 +159,9 @@ if ! built slirp; then
   mark slirp
 fi
 
+# Bionic は librt の関数を libc に持っている。QEMU が -lrt を探すので、空のライブラリを置く
+"$AR" cru "$SYSROOT/lib/librt.a"
+
 # QEMU 本体
 src=$(extract "$QEMU_TAR" qemu)
 for p in "$ROOT"/vm/qemu/patches/*.patch; do

@@ -8,6 +8,7 @@
 # 使い方（Linux の x86_64。NDK、meson、ninja、python3、pkg-config、curl が必要）:
 #   ANDROID_NDK_HOME=... vm/scripts/build-qemu.sh arm64-v8a
 #   ANDROID_NDK_HOME=... vm/scripts/build-qemu.sh x86_64     # エミュレーター（AVD）での開発用
+#   FETCH_ONLY=1 vm/scripts/build-qemu.sh arm64-v8a          # ソースを vm/build/dl に取ってくるだけ
 #
 # ソース: https://www.qemu.org/ （GPL-2.0）ほか。ライセンスは docs/vm-plan.md の 8 章
 set -euo pipefail
@@ -19,8 +20,6 @@ OUT="${OUT:-$ROOT/vm/out/$ABI}"
 WORK="${WORK:-$ROOT/vm/build/qemu-$ABI}"
 DL="${DL:-$ROOT/vm/build/dl}"
 API=26 # アプリの minSdk と同じ
-NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME を設定してください}"
-TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 
 case "$ABI" in
   arm64-v8a) TRIPLE=aarch64-linux-android; CPU=aarch64; CPU_FAMILY=aarch64 ;;
@@ -45,7 +44,11 @@ ICONV_TAR=$(fetch "https://mirrors.kernel.org/gnu/libiconv/libiconv-1.19.tar.gz"
 FFI_TAR=$(fetch "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz" 7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4)
 PCRE2_TAR=$(fetch "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.49/pcre2-10.49.tar.bz2" 53c156e1ba416a20da8e65395daa132da0d80e76910424caca3fcdae7831d384)
 ZLIB_TAR=$(fetch "https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.xz" 4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c)
+# ソースを配るとき（GPL の義務。vm-release.yml）は取ってくるだけ
+[ -z "${FETCH_ONLY:-}" ] || exit 0
 
+NDK="${ANDROID_NDK_HOME:?ANDROID_NDK_HOME を設定してください}"
+TOOLCHAIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
 SYSROOT="$WORK/sysroot"
 mkdir -p "$WORK/src" "$SYSROOT" "$OUT"
 

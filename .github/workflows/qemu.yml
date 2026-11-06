@@ -16,6 +16,8 @@ on:
       - "vm/scripts/build-qemu.sh"
       - ".github/workflows/qemu.yml"
   workflow_dispatch:
+  # vm-release.yml から呼ぶ
+  workflow_call:
 
 permissions:
   contents: read

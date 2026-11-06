@@ -1,0 +1,69 @@
+# Android 用の QEMU を NDK でビルドする。QEMU まわりを変えた PR と、main への push のときだけ動く。
+# main の必須チェックではない。生成物は GitHub Releases に置く（docs/vm-plan.md）。
+name: qemu
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "vm/qemu/**"
+      - "vm/scripts/build-qemu.sh"
+      - ".github/workflows/qemu.yml"
+  push:
+    branches: [main]
+    paths:
+      - "vm/qemu/**"
+      - "vm/scripts/build-qemu.sh"
+      - ".github/workflows/qemu.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qemu-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qemu:
+    name: QEMU をビルドする
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        abi: [arm64-v8a, x86_64]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 道具を入れる
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            ninja-build pkg-config python3-pip python3-venv flex bison patch
+          # glib と QEMU が求める版の meson（Ubuntu のものは古い）
+          pip3 install --user --break-system-packages 'meson==1.12.1' packaging
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: NDK を入れる
+        run: |
+          # terminal-emulator の ndkVersion と同じ版
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.1.12297006" >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.1.12297006" >> "$GITHUB_ENV"
+
+      - name: ビルドする
+        run: bash vm/scripts/build-qemu.sh ${{ matrix.abi }}
+
+      - name: 生成物を残す
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: libqemu-${{ matrix.abi }}
+          path: vm/out/${{ matrix.abi }}/libqemu.so
+          retention-days: 14
+
+      - name: 失敗したときのログ
+        if: failure()
+        run: |
+          find vm/build -name 'meson-log.txt' | while read -r f; do
+            echo "=== $f"; tail -60 "$f"
+          done

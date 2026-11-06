@@ -1,0 +1,133 @@
+Android（Bionic、API 26）で動かすための修正。Termux の qemu-system-x86-64-headless の patch
+（0000・0003・0014・0016・0017・0021）を元に、Termux の場所に依存するところを外してまとめた。
+
+- ivshmem は使わない
+- Bionic の st_atime_nsec などはマクロで、V9fsStatDotl のメンバーとぶつかる
+- signalfd はアプリのプロセスで使えないことがある
+- Android 11 以降のタグ付きポインターを切る（TCG の中でアドレスを扱うところと合わない）
+- shm_open は Bionic に無い（共有メモリのバックエンドは使わない）
+- statx は API 30 から
+
+--- a/meson.build
++++ b/meson.build
+@@ -2895,9 +2895,6 @@ config_host_data.set('CONFIG_PTHREAD_AFFINITY_NP', cc.links(osdep_prefix + '''
+     CPU_FREE(cpuset);
+     return 0;
+   }''', dependencies: threads))
+-config_host_data.set('CONFIG_SIGNALFD', cc.links(osdep_prefix + '''
+-  #include <sys/signalfd.h>
+-  int main(void) { return signalfd(-1, NULL, SFD_CLOEXEC); }'''))
+
+ config_host_data.set('HAVE_MLOCKALL', cc.links(osdep_prefix + '''
+   #include <sys/mman.h>
+@@ -3256,7 +3256,7 @@ disassemblers = {
+   'loongarch' : ['CONFIG_LOONGARCH_DIS'],
+ }
+
+-have_ivshmem = config_host_data.get('CONFIG_EVENTFD')
++have_ivshmem = false
+ host_kconfig = \
+   (get_option('fuzzing') ? ['CONFIG_FUZZ=y'] : []) + \
+   (have_tpm ? ['CONFIG_TPM=y'] : []) + \
+--- a/fsdev/9p-marshal.h
++++ b/fsdev/9p-marshal.h
+@@ -47,6 +47,18 @@ typedef struct V9fsIattr {
+     int64_t mtime_nsec;
+ } V9fsIattr;
+
++#ifdef st_atime_nsec
++# undef st_atime_nsec
++#endif
++
++#ifdef st_mtime_nsec
++# undef st_mtime_nsec
++#endif
++
++#ifdef st_ctime_nsec
++# undef st_ctime_nsec
++#endif
++
+ typedef struct V9fsStatDotl {
+     uint64_t st_result_mask;
+     V9fsQID qid;
+--- a/hw/9pfs/9p-local.c
++++ b/hw/9pfs/9p-local.c
+@@ -307,8 +307,6 @@ update_map_file:
+
+     map_fd = fileno(fp);
+     assert(map_fd != -1);
+-    ret = fchmod(map_fd, 0600);
+-    assert(ret == 0);
+
+     if (credp->fc_uid != -1) {
+         uid = credp->fc_uid;
+--- a/system/vl.c
++++ b/system/vl.c
+@@ -145,6 +145,23 @@
+ #include "qemu/keyval.h"
+ #include "memory-internal.h"
+
++#ifdef __ANDROID__
++#include <android/api-level.h>
++#include <malloc.h>
++#include <sys/system_properties.h>
++static void android_disable_tags(void)
++{
++#ifdef M_BIONIC_SET_HEAP_TAGGING_LEVEL
++    /* API 31 以降の mallopt で切る。それより前の端末（Android 11）はタグが付かない設定を前提にする */
++    if (android_get_device_api_level() >= 31) {
++        mallopt(M_BIONIC_SET_HEAP_TAGGING_LEVEL, 0);
++    }
++#endif
++}
++#else
++static void android_disable_tags(void) {}
++#endif
++
+ #define MAX_VIRTIO_CONSOLES 1
+
+ typedef struct BlockdevOptionsQueueEntry {
+@@ -2861,6 +2878,8 @@ void qemu_init(int argc, char **argv)
+     bool userconfig = true;
+     FILE *vmstate_dump_file = NULL;
+
++    android_disable_tags();
++
+     qemu_add_opts(&qemu_drive_opts);
+     qemu_add_drive_opts(&qemu_legacy_drive_opts);
+     qemu_add_drive_opts(&qemu_common_drive_opts);
+--- a/util/oslib-posix.c
++++ b/util/oslib-posix.c
+@@ -61,6 +61,21 @@
+ #include "qemu/memalign.h"
+ #include "qemu/mmap-alloc.h"
+
++#ifdef __ANDROID__
++/* Bionic に無い。共有メモリのバックエンド（memory-backend-shm）は使わない */
++static int shm_unlink(const char *name)
++{
++    errno = ENOSYS;
++    return -1;
++}
++
++static int shm_open(const char *name, int oflag, mode_t mode)
++{
++    errno = ENOSYS;
++    return -1;
++}
++#endif
++
+ #define MAX_MEM_PREALLOC_THREAD_COUNT 32
+
+ struct MemsetThread;
+--- a/block/file-posix.c
++++ b/block/file-posix.c
+@@ -427,7 +427,7 @@ static void raw_probe_alignment(BlockDriverState *bs, int fd, Error **errp)
+     bs->bl.request_alignment = 0;
+     s->buf_align = 0;
+
+-#if defined(__linux__) && defined(STATX_DIOALIGN)
++#if defined(__linux__) && defined(STATX_DIOALIGN) && !defined(__ANDROID__)
+     struct statx stx;
+
+     /*

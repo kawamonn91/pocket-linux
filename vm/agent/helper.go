@@ -21,7 +21,7 @@ import (
 // があっても root の外には書けない。標準入力・標準出力でデータを受け渡す。
 func runHelper(args []string) int {
 	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "使い方: pocket-agent helper <untar|tar|put|get> <root> <path> ...")
+		fmt.Fprintln(os.Stderr, "使い方: pocket-agent helper <untar|tar|put|get|mkdir|rm> <root> <path> ...")
 		return 2
 	}
 	op, root, p := args[0], args[1], path.Clean("/"+args[2])
@@ -57,6 +57,15 @@ func runHelper(args []string) int {
 		if f, err = os.Open(p); err == nil {
 			_, err = io.Copy(os.Stdout, f)
 			f.Close()
+		}
+	case "mkdir":
+		syscall.Umask(0o022)
+		err = os.MkdirAll(p, 0o755)
+	case "rm":
+		if p == "/" {
+			err = fmt.Errorf("/ は消せません")
+		} else {
+			err = os.RemoveAll(p)
 		}
 	default:
 		err = fmt.Errorf("知らない op です: %s", op)
@@ -229,7 +238,8 @@ func (zeroReader) Read(b []byte) (int, error) {
 	return len(b), nil
 }
 
-// writeTar は src の下を tar にする（バックアップ用）。exclude は src からの相対パス。
+// writeTar は src の下を tar にする（バックアップ用）。exclude は src からの相対パスで、
+// フォルダならフォルダ自体は残して中身を入れない（/proc や /tmp がコンテナに無いと困るので）。
 func writeTar(w io.Writer, src string, exclude []string) error {
 	tw := tar.NewWriter(w)
 	skip := map[string]bool{}
@@ -242,10 +252,7 @@ func writeTar(w io.Writer, src string, exclude []string) error {
 			return nil
 		}
 		rel := "/" + strings.TrimPrefix(strings.TrimPrefix(p, src), "/")
-		if skip[rel] {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
+		if skip[rel] && !d.IsDir() {
 			return nil
 		}
 		info, err := os.Lstat(p)
@@ -301,6 +308,9 @@ func writeTar(w io.Writer, src string, exclude []string) error {
 					return err
 				}
 			}
+		}
+		if skip[rel] {
+			return filepath.SkipDir
 		}
 		return nil
 	})

@@ -56,6 +56,10 @@ type containerTable struct {
 var containers = &containerTable{byID: map[string]*container{}}
 
 func (t *containerTable) setDNS(servers []string) {
+	// VM のルートの /etc/resolv.conf（rclone が読む）は /run/resolv.conf へのリンク
+	if err := writeResolvConf("/run", "/resolv.conf", servers); err != nil {
+		logf("resolv.conf を書けません: %v", err)
+	}
 	t.mu.Lock()
 	t.dns = append([]string(nil), servers...)
 	list := make([]*container, 0, len(t.byID))

@@ -49,20 +49,22 @@ OPEN の直後に DATA や EOF を送ってよい（ゲストは OPEN を受け�
 |---|---|---|
 | `exec` | `container`, `hostname`, `argv`, `env`, `cwd`, `pty`, `cols`, `rows` | コマンドを動かす。`container` が空なら VM のルート（rclone など）、あればそのコンテナの中（動いていなければ起動する）。`env` は全部アプリが渡す |
 | `untar` | `container`, `path` | 標準入力の tar を展開する。OCI のレイヤーとして扱う（ホワイトアウト、所有者、権限、ハードリンク、デバイスファイル、拡張属性）。gzip は解いて流す |
-| `tar` | `container`, `path`, `exclude` | `path` の下を tar にして標準出力へ流す（バックアップ。`exclude` は `path` からの相対パス） |
+| `tar` | `container`, `path`, `exclude` | `path` の下を tar にして標準出力へ流す（バックアップ。`exclude` は `path` からの相対パスで、フォルダならフォルダ自体は残して中身を入れない） |
 | `put` | `container`, `path`, `mode` | 標準入力の内容をファイルに書く（一度別名に書いて置き換える。上書きなら元の所有者を引き継ぐ） |
 | `get` | `container`, `path` | ファイルの内容を標準出力へ流す |
+| `mkdir` | `container`, `path` | フォルダを作る（親もまとめて）。VM のルートにはシェルが無いので、このために用意している |
+| `rm` | `container`, `path` | ファイルやフォルダを消す（中身ごと） |
 | `stop` | `container` | コンテナを止める（中のプロセスはすべて終わる。止まるのを待ってから EXIT） |
 | `delete` | `container` | コンテナを止めて消す |
 | `df` | | データ用のディスクの使用量を JSON で返す `{total, free, used}` |
 | `du` | `container` | コンテナの使用量を JSON で返す `{bytes}` |
 | `settime` | `time` | ゲストの時計を合わせる（スリープ明けなど） |
-| `dns` | `servers` | 動いているコンテナの `resolv.conf` を書き直す（ネットワークが変わったとき） |
+| `dns` | `servers` | VM のルートと、動いているコンテナの `resolv.conf` を書き直す（ネットワークが変わったとき） |
 | `watch` | `path`, `exclude` | フォルダの下の変化を見張り、変わったパスを 1 行ずつ送る（Drive の同期のきっかけ）。CLOSE まで続く |
 | `proxy` | `listen`, `target` | VM の中の TCP をつなぐ（rclone のログインのときなど）。CLOSE まで続く |
 | `shutdown` | | コンテナを止め、`/data` を読み取り専用にして VM の電源を切る。EXIT を返してから止まる |
 
-`untar`・`tar`・`put`・`get` は、コンテナの rootfs に chroot してから作業する（イメージの中のシンボリックリンクで外に書けない）。コンテナが動いていなくても使える。
+`untar`・`tar`・`put`・`get`・`mkdir`・`rm` は、`container` を省くと VM のルートで作業する。コンテナを指定すると、その rootfs に chroot してから作業する（イメージの中のシンボリックリンクで外に書けない）。コンテナが動いていなくても使える。
 
 ## イベント（EVENT）
 

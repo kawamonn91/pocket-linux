@@ -49,6 +49,9 @@ HOME_URL="https://github.com/kawamonn91/pocket-linux"
 EOF
 printf 'root:x:0:0:root:/data/system/home:/sbin/pocket-agent\n' > "$root/etc/passwd"
 printf 'root:x:0:\n' > "$root/etc/group"
+printf '127.0.0.1 localhost\n::1 localhost\n' > "$root/etc/hosts"
+# DNS はエージェントが /run に書く（アプリから教わる）
+ln -s /run/resolv.conf "$root/etc/resolv.conf"
 
 find "$root" -exec touch -h -d "@$SOURCE_DATE_EPOCH" {} +
 rm -f "$OUT/system.erofs"

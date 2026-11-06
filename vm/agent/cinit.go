@@ -83,7 +83,7 @@ func runCinit() {
 			// セッションのプロセスグループ全体に送る（setsid しているので pgid = pid）
 			_ = syscall.Kill(-m.Pid, syscall.Signal(m.Signal))
 		case "resolv":
-			_ = writeResolvConf("/", m.Servers)
+			_ = writeResolvConf("/", "/etc/resolv.conf", m.Servers)
 		}
 	}
 }
@@ -164,7 +164,7 @@ func setupContainerRoot(rootfs, hostname string, dns []string) error {
 			}
 		}
 	}
-	if err := writeResolvConf(rootfs, dns); err != nil {
+	if err := writeResolvConf(rootfs, "/etc/resolv.conf", dns); err != nil {
 		return fmt.Errorf("resolv.conf: %w", err)
 	}
 	if hostname != "" {
@@ -184,7 +184,7 @@ func setupContainerRoot(rootfs, hostname string, dns []string) error {
 	return os.Chdir("/")
 }
 
-func writeResolvConf(root string, servers []string) error {
+func writeResolvConf(root, file string, servers []string) error {
 	var b strings.Builder
 	b.WriteString("# Pocket Linux が書いています（Android のネットワークの DNS）\n")
 	n := 0
@@ -199,7 +199,7 @@ func writeResolvConf(root string, servers []string) error {
 	if n == 0 {
 		b.WriteString("nameserver 1.1.1.1\nnameserver 8.8.8.8\n")
 	}
-	return writeFileIn(root, "/etc/resolv.conf", []byte(b.String()), 0o644)
+	return writeFileIn(root, file, []byte(b.String()), 0o644)
 }
 
 // --- SOCK_SEQPACKET の上の JSON と fd の受け渡し

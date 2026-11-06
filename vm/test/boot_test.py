@@ -11,6 +11,7 @@ import gzip
 import http.client
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -26,7 +27,6 @@ CMDLINE = ("console=hvc0 root=/dev/vda rootfstype=erofs ro init=/sbin/pocket-age
 ENV = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8",
        "TERM=xterm-256color", "DEBIAN_FRONTEND=noninteractive"]
 UBUNTU = "ubuntu"
-HTTP_PORT = 18080
 PROXY_PORT = 18081
 
 
@@ -55,8 +55,7 @@ class Vm:
             "-device", "virtio-blk-device,drive=data,serial=pocket-data",
             "-drive", f"if=none,id=sys,file={os.path.join(out, 'system.erofs')},format=raw,readonly=on",
             "-device", "virtio-blk-device,drive=sys,serial=pocket-system",
-            "-netdev", f"user,id=n0,hostfwd=tcp:127.0.0.1:{HTTP_PORT}-:{HTTP_PORT},"
-                       f"hostfwd=tcp:127.0.0.1:{PROXY_PORT}-:{PROXY_PORT}",
+            "-netdev", f"user,id=n0,hostfwd=tcp:127.0.0.1:{PROXY_PORT}-:{PROXY_PORT}",
             "-device", "virtio-net-device,netdev=n0",
             "-device", "virtio-serial-device",
             "-chardev", f"socket,id=agent,path={self.sock},server=on,wait=off",
@@ -193,7 +192,7 @@ def test_io(vm):
     time.sleep(1)
     vm.client.close(chan)
     time.sleep(1)
-    r = vm.run("for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done | grep -c 'sleep 4242' || true")
+    r = vm.run("for p in /proc/[0-9]*; do tr '\\0' ' ' < $p/cmdline 2>/dev/null; echo; done | grep -c 'sleep 424[2]' || true")
     check("CLOSE でプロセスが止まる", r.text.strip() in ("0", ""), r.text)
 
     r = vm.call({"op": "put", "container": UBUNTU, "path": "/tmp/put/hello.txt", "mode": 0o640}, stdin=b"hello\n")
@@ -289,27 +288,45 @@ def test_events_and_network(vm):
     check("watch が変化を知らせる", b"/sub/a" in res.stdout and b"/b" in res.stdout, bytes(res.stdout))
     vm.client.close(chan)
 
-    # slirp のポート転送と proxy
-    srv, srv_res = vm.client.open({"op": "exec", "argv": ["/usr/bin/rclone", "serve", "http", "/etc", "--addr",
-                                                          f"10.0.2.15:{HTTP_PORT}"]})
-    prx, _ = vm.client.open({"op": "proxy", "listen": f"10.0.2.15:{PROXY_PORT}", "target": f"10.0.2.15:{HTTP_PORT}"})
-    for name, port in (("ポート転送", HTTP_PORT), ("proxy", PROXY_PORT)):
-        ok, detail = False, ""
-        deadline = time.time() + 40
-        while time.time() < deadline and not ok:
-            try:
-                conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
-                conn.request("GET", "/os-release")
-                resp = conn.getresponse()
-                ok = resp.status == 200 and b"Pocket Linux VM" in resp.read()
-                conn.close()
-            except OSError as ex:
-                detail = str(ex)
-            if not ok:
-                time.sleep(1)
-        check(f"{name}で VM の中のサーバーに届く", ok, detail)
+    # Drive のログインと同じ経路: ブラウザ → slirp のポート転送 → proxy → VM の 127.0.0.1 の rclone
+    srv, srv_res = vm.client.open({"op": "exec", "argv": ["/usr/bin/rclone", "authorize", "drive", "--auth-no-open-browser"]})
+    prx, _ = vm.client.open({"op": "proxy", "listen": f"10.0.2.15:{PROXY_PORT}", "target": "127.0.0.1:53682"})
+    url = None
+    deadline = time.time() + 40
+    while time.time() < deadline and url is None:
+        found = re.search(rb"http://127\.0\.0\.1:53682(/auth\?state=[A-Za-z0-9_\-]+)", bytes(srv_res.stdout + srv_res.stderr))
+        url = found.group(1).decode() if found else None
+        time.sleep(0.2)
+    check("rclone がログインの URL を出す", url is not None, bytes(srv_res.stderr[-400:]))
+    ok, detail = False, ""
+    deadline = time.time() + 30
+    while url and time.time() < deadline and not ok:
+        try:
+            conn = http.client.HTTPConnection("127.0.0.1", PROXY_PORT, timeout=10)
+            conn.request("GET", url)
+            resp = conn.getresponse()
+            detail = f"{resp.status} {resp.getheader('Location')}"
+            ok = "accounts.google.com" in (resp.getheader("Location") or "")
+            conn.close()
+        except (OSError, http.client.HTTPException) as ex:
+            detail = str(ex)
+        if not ok:
+            time.sleep(1)
+    check("ポート転送と proxy で VM の中のサーバーに届く", ok, detail)
     vm.client.close(srv)
     vm.client.close(prx)
+
+    # VM のルートの名前解決（rclone が使う）
+    r = vm.call({"op": "get", "path": "/etc/resolv.conf"})
+    check("VM のルートにも DNS の設定がある", f"nameserver {vm.args.dns}".encode() in r.stdout, bytes(r.stdout))
+    r = vm.call({"op": "mkdir", "path": "/data/drive/made/by/agent"})
+    check_exit("mkdir", r)
+    r = vm.run("test -d /mnt/drive/made/by/agent")
+    check_exit("mkdir したフォルダがコンテナから見える", r)
+    r = vm.call({"op": "rm", "path": "/data/drive/made"})
+    check_exit("rm", r)
+    r = vm.run("test ! -e /mnt/drive/made")
+    check_exit("rm したフォルダが消える", r)
 
 
 def test_backup(vm):
@@ -331,6 +348,7 @@ def test_backup(vm):
         names = tf.getnames()
     check("tar に中身がある", any(n.endswith("usr/bin/sudo") for n in names), str(names[:5]))
     check("tar が除外を守る", not any(n.startswith("./proc/") for n in names))
+    check("除外したフォルダ自体は残る", "./proc" in names, str(names[:5]))
 
     with open(path, "rb") as f:
         r = vm.call({"op": "untar", "container": "restored"}, stdin=f, timeout=900)

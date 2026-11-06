@@ -218,7 +218,7 @@ func (s *server) open(sess *session, req openRequest) {
 	switch req.Op {
 	case "exec":
 		s.exec(sess, req)
-	case "untar", "tar", "put", "get":
+	case "untar", "tar", "put", "get", "mkdir", "rm":
 		s.helper(sess, req)
 	case "stop":
 		containers.stop(req.Container)

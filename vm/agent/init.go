@@ -32,7 +32,7 @@ func runInit() {
 	bringUpLoopback()
 	setupData()
 	setupStorage()
-	for _, d := range []string{"/data/containers", "/data/drive", "/data/pocket-dev", "/data/system/home"} {
+	for _, d := range []string{"/data/containers", "/data/drive", "/data/pocket-dev", "/data/system/home", "/data/system/rclone"} {
 		_ = os.MkdirAll(d, 0o755)
 	}
 	_ = os.MkdirAll("/run/pocket/open", 0o1777)

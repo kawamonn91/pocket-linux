@@ -17,5 +17,10 @@ third_party/termux-debs/x/
 third_party/termux-debs/Packages-*
 third_party/rclone-build/
 
+# VM の生成物（vm/scripts/ で作り直せる。配布は GitHub Releases）
+vm/out/
+vm/test/work/
+
 hs_err_pid*.log
 replay_pid*.log
+__pycache__/

@@ -79,9 +79,9 @@ Android のアプリ（com.ttech.pocketlinux）
 
 - **カーネル**: その時点の LTS の版に固定する。QEMU の `virt` マシン用に、virtio-mmio・ext4・erofs・overlayfs・9p・FUSE・名前空間・cgroup v2・netfilter（nftables と iptables 互換）・bridge・veth・tun・WireGuard・zram・BPF を組み込む。PCI・USB・画面・音・無線などは入れない。`CONFIG_HZ=100` と tickless にして、何もしていないときの CPU を減らす
 - **initramfs も init システム（OpenRC・systemd）も使わない。** カーネルが system.erofs を `/` にして、`pocket-agent` を直接 PID 1 として起動する
-- **system.erofs**（lz4 で圧縮した読み取り専用のファイルシステム）: pocket-agent、busybox（調べ物用）、e2fsprogs（mkfs・fsck・resize2fs）、CA 証明書。Drive の同期をゲストに移す場合は rclone も入れる
+- **system.erofs**（lz4 で圧縮した読み取り専用のファイルシステム）: pocket-agent、rclone、CA 証明書だけ。mkfs はせずひな形（data.img.gz）を使い、広げるのはエージェントが ioctl で行い、壊れたときの回復は ext4 のジャーナルに任せるので、e2fsprogs と busybox は入れない
 - **pocket-agent**（Go。rclone のビルドで使っている Go の環境をそのまま使える）の仕事:
-  - 起動: `/proc`・`/sys`・`/dev` の mount、data.img の確認（初回は mkfs、毎回 fsck）、ネットワークの設定（10.0.2.15/24 に固定。DHCP を待たない）、時刻、ゾンビプロセスの回収
+  - 起動: `/proc`・`/sys`・`/dev` の mount、data.img の mount（ひな形は `data.img.gz` として APK に入れる。ファイルが大きくなっていれば広げる）、時刻、ゾンビプロセスの回収。ネットワークはカーネルの `ip=` で 10.0.2.15/24 に固定する（DHCP を待たない）
   - 制御用のチャンネル: コマンドの実行（PTY あり・なし）、画面の大きさの変更、シグナル、終了コード、ファイルの送受信、tar の展開・書き出し、URL を開く依頼（ゲスト → アプリ）、時刻合わせ、停止、使用量の報告
   - コンテナの実行: コンテナごとに名前空間（mount・PID・UTS・IPC）を作り、`pivot_root` で中に入る。ネットワークは VM と共有する。ユーザー自身の VM なので特権コンテナにする（中で Docker も動かせる）
   - 一般ユーザー `user` の作成（今の `RootfsSetup` の処理をゲスト側に移す）
@@ -92,11 +92,11 @@ Android のアプリ（com.ttech.pocketlinux）
 libqemu.so -M virt -cpu max,pauth-impdef=on -smp 4 -m 1024
   -accel tcg,thread=multi,tb-size=256
   -nodefaults -no-user-config -nographic
-  -kernel Image -append "console=hvc0 root=/dev/vda rootfstype=erofs ro init=/sbin/pocket-agent quiet mitigations=off"
-  -drive if=none,id=sys,file=system.erofs,format=raw,readonly=on   -device virtio-blk-device,drive=sys
-  -object iothread,id=io0
+  -kernel Image -append "console=hvc0 root=/dev/vda rootfstype=erofs ro init=/sbin/pocket-agent quiet mitigations=off panic=-1 ip=10.0.2.15::10.0.2.2:255.255.255.0::eth0:off"
+  -no-reboot
   -drive if=none,id=data,file=data.img,format=raw,cache=writeback,discard=unmap,aio=threads
-  -device virtio-blk-device,drive=data,iothread=io0
+  -device virtio-blk-device,drive=data,serial=pocket-data
+  -drive if=none,id=sys,file=system.erofs,format=raw,readonly=on   -device virtio-blk-device,drive=sys,serial=pocket-system
   -netdev user,id=n0 -device virtio-net-device,netdev=n0
   -device virtio-serial-device
   -chardev socket,id=agent,path=<files>/vm/agent.sock,server=on,wait=off -device virtserialport,chardev=agent,name=pocket.agent
@@ -106,6 +106,7 @@ libqemu.so -M virt -cpu max,pauth-impdef=on -smp 4 -m 1024
 ```
 
 - 機器はすべて virtio-mmio（`virtio-*-device`）にする。PCI を使わないので、オプション ROM などの付属ファイルが要らない
+- `virt` マシンでは後ろの `-device` が先に見つかる。system.erofs を `/dev/vda` にするため、data.img より後ろに書く。data.img はエージェントが serial で探す
 - `-cpu` は Phase 0 で `max,pauth-impdef=on`・`max,pauth=off,sve=off`・`cortex-a76` を比べて決める（ポインター認証や SVE の再現は重い）
 - ゲストは端末の種類にかかわらず **aarch64 だけ**にする。カーネル・system.erofs・エージェントは 1 種類で済み、Docker Hub からは常に arm64 のイメージを取る。x86_64 版の QEMU は、エミュレーター（AVD）での開発用に同梱する
 
@@ -168,10 +169,10 @@ main を常に公開できる状態に保つため、VM の方式は 2.0 まで�
 
 ### Phase 1: ゲスト側（カーネル・system.erofs・pocket-agent）（3〜4 日）
 
-- `guest/kernel/pocket.config` と `scripts/build-kernel.sh`（版とソースの SHA-256 を固定し、同じ入力から同じ物ができるようにする）
-- `guest/agent/`（Go）: 4.2 の仕事。制御用のチャンネルの約束事は `docs/vm-protocol.md` に書く
-- `scripts/build-system-image.sh`: system.erofs を作る
-- CI に `guest.yml` を足す: Linux のランナーの qemu-system-aarch64 でゲストを起動し、ubuntu:24.04 の rootfs を入れて `sudo whoami` が `root` になるまでを確かめる
+- `vm/kernel/required.config`・`extra.config` と `vm/scripts/build-kernel.sh`（版とソースの SHA-256 を固定し、同じ入力から同じ物ができるようにする）
+- `vm/agent/`（Go）: 4.2 の仕事。制御用のチャンネルの約束事は `docs/vm-protocol.md` に書く
+- `vm/scripts/build-system.sh`: system.erofs とデータ用ディスクのひな形（data.img.gz）を作る
+- CI に `guest.yml` を足す: arm64 の Linux ランナーの qemu-system-aarch64（TCG）でゲストを起動し、ubuntu:24.04 の rootfs を入れて `sudo whoami` が `root` になるまでを確かめる（`vm/test/boot_test.py`）
 - 生成物（カーネル・system.erofs）の置き場所を決める（推奨: GitHub Releases に置き、ビルドのときに SHA-256 を固定して取ってくる。Git の履歴が重くならない）
 - 完了条件: CI の QEMU で、起動からコンテナのシェルまで動き、テストが通る
 

@@ -1,0 +1,88 @@
+# VM のゲスト（カーネル・system.erofs・pocket-agent）をビルドし、QEMU で起動して確かめる。
+# ゲストまわりを変えた PR と、main への push のときだけ動く。
+# 本番と同じく arm64 の上で TCG（ソフトウェア）で動かすので、速さの目安にもなる。
+name: guest
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "vm/**"
+      - ".github/workflows/guest.yml"
+  push:
+    branches: [main]
+    paths:
+      - "vm/**"
+      - ".github/workflows/guest.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guest:
+    name: ゲストをビルドして起動する
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    env:
+      UBUNTU_BASE: ubuntu-base-24.04.3-base-arm64.tar.gz
+      UBUNTU_BASE_SHA256: 7b2dced6dd56ad5e4a813fa25c8de307b655fdabc6ea9213175a92c48dabb048
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27.3"
+          cache: false
+
+      - name: 道具を入れる
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            build-essential flex bison bc libelf-dev libssl-dev erofs-utils e2fsprogs qemu-system-arm
+
+      - name: エージェントの単体テスト
+        working-directory: vm/agent
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          go test ./...
+
+      # カーネルは設定を変えたときだけ作り直す
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: kernel-cache
+        with:
+          path: |
+            vm/out/Image
+            vm/out/kernel.config
+          key: kernel-arm64-${{ hashFiles('vm/kernel/**', 'vm/scripts/build-kernel.sh') }}
+
+      - name: カーネルをビルドする
+        if: steps.kernel-cache.outputs.cache-hit != 'true'
+        run: bash vm/scripts/build-kernel.sh
+
+      - name: system.erofs と data.img を作る
+        run: bash vm/scripts/build-system.sh
+
+      - name: ubuntu-base を取ってくる
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/$UBUNTU_BASE" \
+            "https://cdimage.ubuntu.com/ubuntu-base/releases/24.04/release/$UBUNTU_BASE"
+          echo "$UBUNTU_BASE_SHA256  $RUNNER_TEMP/$UBUNTU_BASE" | sha256sum -c --quiet
+
+      - name: VM を起動して確かめる
+        run: python3 vm/test/boot_test.py --out vm/out --rootfs "$RUNNER_TEMP/$UBUNTU_BASE" --work "$RUNNER_TEMP/vm-work"
+
+      - name: 生成物を残す
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: vm-guest
+          path: |
+            vm/out/
+          retention-days: 14
+          if-no-files-found: ignore

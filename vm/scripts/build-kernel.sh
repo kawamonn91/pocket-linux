@@ -6,6 +6,7 @@
 #
 # 使い方（Linux。arm64 の機械ならそのまま、x86_64 なら aarch64-linux-gnu-gcc が必要）:
 #   vm/scripts/build-kernel.sh
+#   FETCH_ONLY=1 vm/scripts/build-kernel.sh   # ソースを vm/build/dl に取ってくるだけ
 #
 # ソース: https://www.kernel.org/ （GPL-2.0）
 set -euo pipefail
@@ -23,6 +24,8 @@ mkdir -p "$WORK" "$OUT" "$DL"
 tarball="$DL/linux-$VERSION.tar.xz"
 [ -f "$tarball" ] || curl -fsSL "$URL" -o "$tarball"
 echo "$SHA256  $tarball" | sha256sum -c --quiet
+# ソースを配るとき（GPL の義務。vm-release.yml）は取ってくるだけ
+[ -z "${FETCH_ONLY:-}" ] || exit 0
 
 src="$WORK/linux-$VERSION"
 if [ ! -d "$src" ]; then

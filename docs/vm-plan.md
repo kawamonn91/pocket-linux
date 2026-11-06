@@ -281,7 +281,14 @@ main を常に公開できる状態に保つため、VM の方式は 2.0 まで�
 
 ### エミュレーター（x86_64 の QEMU で arm64 のゲスト。AVD `pocketlinux`、Android 16）
 
-EMULATOR_RESULTS
+2026-11-06 に確認:
+
+- **VM の起動**: `pocket-agent` が約 1.3 秒（`1327 ms`）で準備完了（`uname -rm` → `6.18.60-pocket aarch64`、`free -m` → 489 MB）
+- **コンテナの作成（`ubuntu:24.04`）**: イメージ取得・展開・`user` の作成・`sudo` の導入まで完了
+- **基本動作**: `id`（`uid=1001(user)`）、`sudo whoami`（`root`）、ハードリンク（`ln` でリンク数が 2 になる）、`sudo mount -t tmpfs`、DNS（`/etc/resolv.conf` に Android 側の DNS を反映）、`~/drive`・`~/storage` のシンボリックリンク
+- **`xdg-open`**: コンテナ内で `xdg-open https://example.com` を実行し、Android 側のブラウザ（Chrome）が開くことを確認
+- **Docker**: `apt-get install docker.io iptables` で導入し、`sudo dockerd` が `overlayfs`・`cgroup v2` で起動。`sudo docker run --rm hello-world` と `sudo docker run --rm alpine wget -qO- http://example.com`（コンテナ内からの外部通信）が通ることを確認
+- **1.x からの移行**: 1.x の設定・Drive フォルダの移行と、アーキテクチャ不一致（x86_64 の 1.x コンテナを arm64 ゲストに移したとき）のエラー表示（`exec format error`）を確認
 
 ## 参考
 

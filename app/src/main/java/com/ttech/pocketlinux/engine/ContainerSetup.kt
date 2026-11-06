@@ -2,6 +2,7 @@ package com.ttech.pocketlinux.engine
 
 import com.ttech.pocketlinux.vm.Guest
 import com.ttech.pocketlinux.vm.GuestCommands
+import com.ttech.pocketlinux.vm.GuestOutput
 import java.util.concurrent.TimeUnit
 
 /**
@@ -57,7 +58,7 @@ class ContainerSetup(private val guest: Guest) {
         }
 
         val output = guest.capture(GuestCommands.rootScript(config, homeScript(config.home, result.uid)))
-        if (output.exit != 0) throw ContainerException("ホームフォルダを作れませんでした: ${output.stderr.trim().lines().lastOrNull().orEmpty()}")
+        if (output.exit != 0) throw ContainerException("ホームフォルダを作れませんでした: ${reason(output)}")
     }
 
     /**
@@ -70,8 +71,11 @@ class ContainerSetup(private val guest: Guest) {
                 ?.firstOrNull { it.substringBefore(':') == user }?.split(':')?.getOrNull(2)?.toIntOrNull()
         }
         val output = guest.capture(GuestCommands.rootScript(config, legacyRepairScript(config.home, uid)))
-        if (output.exit != 0) throw ContainerException("移行した中身を直せませんでした: ${output.stderr.trim().lines().lastOrNull().orEmpty()}")
+        if (output.exit != 0) throw ContainerException("移行した中身を直せませんでした: ${reason(output)}")
     }
+
+    private fun reason(output: GuestOutput): String =
+        output.error ?: output.stderr.trim().lines().lastOrNull().orEmpty().ifEmpty { "終了コード ${output.exit}" }
 
     companion object {
         private val IGNORED_IMAGE_ENV = setOf("HOME", "USER", "LOGNAME", "HOSTNAME", "TERM", "SHELL", "PWD")

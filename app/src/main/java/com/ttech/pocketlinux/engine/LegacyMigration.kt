@@ -66,6 +66,7 @@ class LegacyMigration(
             log("Google のログイン情報を移しました")
         }
         paths.legacyLeftovers.forEach { AndroidFileOps.deleteTree(it) }
+        paths.legacyDriveDir.delete()
         driveMoved
     }
 

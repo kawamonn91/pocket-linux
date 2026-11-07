@@ -298,6 +298,8 @@ main を常に公開できる状態に保つため、VM の方式は 2.0 まで�
 - 1.x のコンテナの移行は `exec format error` で失敗し、エラーの表示とコンテナの保持を確認（上と同じ理由。約 7 分）
 - Docker と Drive の同期は、このときは試していない
 
+2026-11-07 に見つけた不具合（2.0.0）: コンテナの `user` が `~/drive`（`/mnt/drive`）に書けず、同期したファイルも編集できなかった。`/data/drive` も、VM の中の rclone が作るファイルも root の権限だったため。CI のテストは root で書いていたので気づけなかった。エージェントを版 2 にして直した（`/data/drive` を 777 に、rclone は umask 0 で動かす。前の版の分は `share` で 1 回だけ直す）。CI のテストは一般ユーザーで確かめる
+
 ## 参考
 
 - Podroid: [しくみ](https://extv.github.io/Podroid/guide/how-it-works.html)・[速さ](https://extv.github.io/Podroid/guide/performance.html)・[制限](https://extv.github.io/Podroid/guide/limitations.html)・[リポジトリ](https://github.com/ExTV/Podroid)

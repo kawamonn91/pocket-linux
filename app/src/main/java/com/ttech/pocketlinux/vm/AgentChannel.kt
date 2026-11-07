@@ -36,6 +36,8 @@ data class OpenRequest(
     val target: String? = null,
     val time: Long? = null,
     val servers: List<String>? = null,
+    /** VM のルートの exec を umask 0 で動かす（Drive の同期フォルダに書く rclone 用） */
+    val shared: Boolean? = null,
 )
 
 @Serializable

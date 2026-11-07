@@ -103,6 +103,22 @@ class DriveSync(
     fun onVmRunning() {
         restartWatchers()
         requestSyncAll()
+        scope.launch { repairPermissionsOnce() }
+    }
+
+    /**
+     * 2.0.0 は同期フォルダを root の権限で作っていて、コンテナのユーザーが編集できなかった。
+     * その分を 1 回だけ直す（これから作るものは最初から編集できる）
+     */
+    private suspend fun repairPermissionsOnce() {
+        val marker = File(paths.rcloneDir, "drive-permissions-repaired")
+        if (marker.isFile) return
+        runCatching { guest.share(Rclone.GUEST_DRIVE_DIR) }
+            .onSuccess {
+                paths.rcloneDir.mkdirs()
+                marker.writeText("")
+            }
+            .onFailure { log("同期フォルダの権限を直せませんでした: ${it.message}") }
     }
 
     /** VM が止まったとき: 見張りはチャンネルごと消えている */
@@ -294,7 +310,8 @@ class DriveSync(
             val lastLines = ArrayDeque<String>()
             val localDir = Rclone.guestLocalDir(pair.localName)
             val workDir = Rclone.guestWorkDir(id)
-            guest.mkdir(null, localDir)
+            // コンテナのユーザーも書けるようにする（中身は rclone が umask 0 で作る）
+            guest.mkdir(null, localDir, mode = "777".toInt(8))
             guest.mkdir(null, workDir)
             guest.writeFile(null, Rclone.GUEST_EXCLUDES, state.value.excludes)
             // 最初の同期の前はフォルダが無く、見張りを始められなかった

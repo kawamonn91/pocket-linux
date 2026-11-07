@@ -119,7 +119,7 @@ def tar_stream(path):
 
 
 def test_basics(vm):
-    check("ready の version", vm.ready.get("version") == "1", str(vm.ready))
+    check("ready の version", vm.ready.get("version") == "2", str(vm.ready))
     check("/data が使える", vm.ready.get("data") is True, str(vm.ready))
     print(f"     起動にかかった時間: {vm.boot_seconds:.1f} 秒", flush=True)
 
@@ -268,6 +268,40 @@ def test_user_and_sudo(vm):
     r = vm.run("su -l user -c 'whoami; sudo -n whoami'")
     check_exit("su と sudo が動く", r)
     check("user から sudo で root", r.text.split() == ["user", "root"], f"{r.text!r} {bytes(r.stderr)!r}")
+
+
+def test_drive_permissions(vm):
+    """Drive の同期フォルダを、コンテナの一般ユーザーが編集できる（rclone は VM のルートで root として動く）。"""
+    r = vm.run("su -l user -c 'touch /mnt/drive/from-user && rm /mnt/drive/from-user'")
+    check_exit("一般ユーザーが /mnt/drive の直下に書ける", r)
+
+    r = vm.call({"op": "mkdir", "path": "/data/drive/pair", "mode": 0o777})
+    check_exit("同期フォルダを共有の権限で作れる", r)
+    work = "/data/system/drive-test"
+    r = vm.call({"op": "mkdir", "path": f"{work}/src"})
+    check_exit("rclone の作業フォルダを作れる", r)
+    r = vm.call({"op": "put", "path": f"{work}/src/note.txt"}, stdin=b"from drive\n")
+    check_exit("同期するファイルを置ける", r)
+    r = vm.call({"op": "exec", "shared": True, "argv": [
+        "/usr/bin/rclone", "--config", f"{work}/rclone.conf", "bisync", f"{work}/src", "/data/drive/pair",
+        "--resync", "--workdir", f"{work}/bisync"]})
+    check_exit("rclone で同期できる", r)
+    r = vm.run("su -l user -c 'echo edit >> /mnt/drive/pair/note.txt && mkdir /mnt/drive/pair/sub && touch /mnt/drive/pair/sub/new.txt'")
+    check_exit("rclone が書いたものを一般ユーザーが編集できる", r)
+
+    # 前の版は root の権限で作っていた。share で直せる
+    r = vm.run("mkdir -p /mnt/drive/old/dir && echo a > /mnt/drive/old/dir/f && chmod 755 /mnt/drive/old /mnt/drive/old/dir && chmod 644 /mnt/drive/old/dir/f")
+    check_exit("前の版の権限のものを作れる", r)
+    r = vm.run("su -l user -c 'touch /mnt/drive/old/dir/g'")
+    check("前の版の権限のままだと一般ユーザーは書けない", r.exit and r.exit["code"] != 0, str(r.exit))
+    r = vm.call({"op": "share", "path": "/data/drive/old"})
+    check_exit("share を動かせる", r)
+    r = vm.run("su -l user -c 'echo b >> /mnt/drive/old/dir/f && touch /mnt/drive/old/dir/g'")
+    check_exit("share のあとは一般ユーザーが編集できる", r)
+
+    for p in ["/data/drive/pair", "/data/drive/old", work]:
+        r = vm.call({"op": "rm", "path": p})
+        check_exit(f"{p} を消せる", r)
 
 
 def test_events_and_network(vm):
@@ -422,6 +456,7 @@ def main():
         test_io(vm)
         test_pty(vm)
         test_user_and_sudo(vm)
+        test_drive_permissions(vm)
         test_events_and_network(vm)
         test_backup(vm)
         test_persistence(vm)

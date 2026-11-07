@@ -218,7 +218,7 @@ func (s *server) open(sess *session, req openRequest) {
 	switch req.Op {
 	case "exec":
 		s.exec(sess, req)
-	case "untar", "tar", "put", "get", "mkdir", "rm":
+	case "untar", "tar", "put", "get", "mkdir", "rm", "share":
 		s.helper(sess, req)
 	case "stop":
 		containers.stop(req.Container)
@@ -254,6 +254,9 @@ func (s *server) exec(sess *session, req openRequest) {
 	if req.Container == "" {
 		if len(sr.Env) == 0 {
 			sr.Env = rootEnv()
+		}
+		if req.Shared {
+			sr.Argv = append([]string{agentPath, "shared-exec"}, sr.Argv...)
 		}
 		sp, err := spawnProcess(sr)
 		if err != nil {
@@ -407,6 +410,10 @@ func (s *server) helper(sess *session, req openRequest) {
 			mode = 0o644
 		}
 		argv = append(argv, fmt.Sprintf("%o", mode))
+	case "mkdir":
+		if req.Mode != 0 {
+			argv = append(argv, fmt.Sprintf("%o", req.Mode))
+		}
 	case "tar":
 		argv = append(argv, req.Exclude...)
 	}

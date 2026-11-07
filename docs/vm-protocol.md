@@ -47,12 +47,13 @@ OPEN の直後に DATA や EOF を送ってよい（ゲストは OPEN を受け�
 
 | op | 項目 | すること |
 |---|---|---|
-| `exec` | `container`, `hostname`, `argv`, `env`, `cwd`, `pty`, `cols`, `rows` | コマンドを動かす。`container` が空なら VM のルート（rclone など）、あればそのコンテナの中（動いていなければ起動する）。`env` は全部アプリが渡す |
+| `exec` | `container`, `hostname`, `argv`, `env`, `cwd`, `pty`, `cols`, `rows`, `shared` | コマンドを動かす。`shared` は VM のルートのコマンドを umask 0 で動かす（Drive の同期フォルダに書く rclone 用）。`container` が空なら VM のルート（rclone など）、あればそのコンテナの中（動いていなければ起動する）。`env` は全部アプリが渡す |
 | `untar` | `container`, `path` | 標準入力の tar を展開する。OCI のレイヤーとして扱う（ホワイトアウト、所有者、権限、ハードリンク、デバイスファイル、拡張属性）。gzip は解いて流す |
 | `tar` | `container`, `path`, `exclude` | `path` の下を tar にして標準出力へ流す（バックアップ。`exclude` は `path` からの相対パスで、フォルダならフォルダ自体は残して中身を入れない） |
 | `put` | `container`, `path`, `mode` | 標準入力の内容をファイルに書く（一度別名に書いて置き換える。上書きなら元の所有者を引き継ぐ） |
 | `get` | `container`, `path` | ファイルの内容を標準出力へ流す |
-| `mkdir` | `container`, `path` | フォルダを作る（親もまとめて）。VM のルートにはシェルが無いので、このために用意している |
+| `mkdir` | `container`, `path`, `mode` | フォルダを作る（親もまとめて）。VM のルートにはシェルが無いので、このために用意している。`mode` を付けると、すでにあるフォルダもその権限にする |
+| `share` | `container`, `path` | `path` の下を、どのコンテナのユーザーからも読み書きできる権限にする（フォルダは 777、ファイルは `rw` を足す。リンクは触らない）。Drive の同期フォルダの前の版の分を直すのに使う |
 | `rm` | `container`, `path` | ファイルやフォルダを消す（中身ごと） |
 | `stop` | `container` | コンテナを止める（中のプロセスはすべて終わる。止まるのを待ってから EXIT） |
 | `delete` | `container` | コンテナを止めて消す |

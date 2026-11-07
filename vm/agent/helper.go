@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -21,7 +22,7 @@ import (
 // があっても root の外には書けない。標準入力・標準出力でデータを受け渡す。
 func runHelper(args []string) int {
 	if len(args) < 3 {
-		fmt.Fprintln(os.Stderr, "使い方: pocket-agent helper <untar|tar|put|get|mkdir|rm> <root> <path> ...")
+		fmt.Fprintln(os.Stderr, "使い方: pocket-agent helper <untar|tar|put|get|mkdir|rm|share> <root> <path> ...")
 		return 2
 	}
 	op, root, p := args[0], args[1], path.Clean("/"+args[2])
@@ -59,8 +60,9 @@ func runHelper(args []string) int {
 			f.Close()
 		}
 	case "mkdir":
-		syscall.Umask(0o022)
-		err = os.MkdirAll(p, 0o755)
+		err = makeDir(p, args[3:])
+	case "share":
+		err = shareTree(p)
 	case "rm":
 		if p == "/" {
 			err = fmt.Errorf("/ は消せません")
@@ -318,4 +320,62 @@ func writeTar(w io.Writer, src string, exclude []string) error {
 		return err
 	}
 	return tw.Close()
+}
+
+// makeDir はフォルダを作る。権限を指定したときは（すでにあるフォルダも）その権限にする
+func makeDir(p string, args []string) error {
+	if len(args) == 0 {
+		syscall.Umask(0o022)
+		return os.MkdirAll(p, 0o755)
+	}
+	mode, err := strconv.ParseUint(args[0], 8, 32)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p, os.FileMode(mode)); err != nil {
+		return err
+	}
+	return os.Chmod(p, os.FileMode(mode))
+}
+
+// shareTree は p の下を、どのコンテナのユーザーからも読み書きできるようにする。
+// Drive の同期フォルダは VM の中の rclone（root）とコンテナのユーザーの両方が書くため。
+// 実行の権限はそのまま残す。リンクは先のファイルを変えてしまうので触らない。
+func shareTree(root string) error {
+	return filepath.WalkDir(root, func(name string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		var perm os.FileMode
+		switch {
+		case d.IsDir():
+			perm = 0o777
+		case info.Mode().IsRegular():
+			perm = info.Mode().Perm() | 0o666
+		default:
+			return nil
+		}
+		if info.Mode().Perm() == perm {
+			return nil
+		}
+		return os.Chmod(name, perm)
+	})
+}
+
+// runSharedExec: pocket-agent shared-exec <コマンド> [引数...]
+// umask 0 でコマンドに置き換わる。rclone（root）が Drive の同期フォルダに作るファイルを、
+// コンテナの一般ユーザーが編集できるようにするため。
+func runSharedExec(args []string) int {
+	if len(args) == 0 {
+		fmt.Fprintln(os.Stderr, "使い方: pocket-agent shared-exec <コマンド> [引数...]")
+		return 2
+	}
+	syscall.Umask(0)
+	err := syscall.Exec(args[0], args, os.Environ())
+	fmt.Fprintf(os.Stderr, "%s: %v\n", args[0], err)
+	return 127
 }

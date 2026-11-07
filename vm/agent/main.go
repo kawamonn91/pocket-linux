@@ -8,6 +8,7 @@
 //	pocket-agent              PID 1（VM の init）
 //	pocket-agent cinit        コンテナの中の PID 1（エージェントが名前空間を作って起動する）
 //	pocket-agent helper ...   コンテナの rootfs に chroot して tar の展開などをする
+//	pocket-agent shared-exec  umask 0 でコマンドを実行する（Drive の同期フォルダに書く rclone 用）
 package main
 
 import (
@@ -16,7 +17,7 @@ import (
 )
 
 // Version はエージェントの版。アプリは READY の version で、ゲストとの組み合わせを確かめる。
-const Version = "1"
+const Version = "2"
 
 func main() {
 	if len(os.Args) > 1 {
@@ -26,6 +27,8 @@ func main() {
 			return
 		case "helper":
 			os.Exit(runHelper(os.Args[2:]))
+		case "shared-exec":
+			os.Exit(runSharedExec(os.Args[2:]))
 		case "version":
 			fmt.Println(Version)
 			return

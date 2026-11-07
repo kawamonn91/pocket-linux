@@ -40,6 +40,8 @@ func runInit() {
 	for _, d := range []string{"/data/containers", "/data/drive", "/data/pocket-dev", "/data/system/home", "/data/system/rclone"} {
 		_ = os.MkdirAll(d, 0o755)
 	}
+	// Drive の同期フォルダは、VM の中の rclone（root）とコンテナのユーザーの両方が書く
+	_ = os.Chmod("/data/drive", 0o777)
 	_ = os.MkdirAll("/run/pocket/open", 0o1777)
 	_ = os.Chmod("/run/pocket/open", 0o1777)
 

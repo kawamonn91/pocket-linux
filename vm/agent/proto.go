@@ -108,6 +108,8 @@ type openRequest struct {
 	Target    string   `json:"target,omitempty"`
 	Time      int64    `json:"time,omitempty"`
 	Servers   []string `json:"servers,omitempty"`
+	// Shared は VM のルートの exec を umask 0 で動かす（Drive の同期フォルダに書く rclone 用）
+	Shared bool `json:"shared,omitempty"`
 }
 
 type helloMessage struct {

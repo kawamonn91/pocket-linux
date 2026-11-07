@@ -57,6 +57,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ttech.pocketlinux.drive.DriveSync
+import com.ttech.pocketlinux.drive.Rclone
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -115,7 +116,9 @@ fun DriveScreen(state: DriveSync.State, actions: DriveActions, onBack: () -> Uni
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             when {
-                !state.loggedIn -> item { LoginCard(state.loggingIn, state.loginError, actions::login) }
+                !state.loggedIn -> item {
+                    LoginCard(state.loginConfigured, relogin = state.pairs.isNotEmpty(), state.loggingIn, state.loginError, actions::login)
+                }
                 else -> {
                     item {
                         Text(
@@ -150,12 +153,26 @@ fun DriveScreen(state: DriveSync.State, actions: DriveActions, onBack: () -> Uni
 }
 
 @Composable
-private fun LoginCard(loggingIn: Boolean, error: String?, onLogin: () -> Unit) {
+private fun LoginCard(configured: Boolean, relogin: Boolean, loggingIn: Boolean, error: String?, onLogin: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Google ドライブにログイン", style = MaterialTheme.typography.titleMedium)
             Text(
-                "ブラウザで Google の同意画面が開きます。同期には rclone（オープンソースの同期ツール）を使うため、同意画面には「rclone」と表示されます。",
+                if (relogin) "Google にログインし直してください" else "Google ドライブにログイン",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            if (!configured) {
+                Text(Rclone.NOT_CONFIGURED, style = MaterialTheme.typography.bodyMedium)
+                return@Column
+            }
+            if (relogin) {
+                Text(
+                    "ログインするまで同期は止まっています。同期するフォルダの設定と中身はそのまま残っていて、ログインすると再開します。",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            Text(
+                "ブラウザで Google の同意画面が開きます。「このアプリは Google で確認されていません」と出たら、" +
+                    "「詳細」から「T-tech Pocket に移動」へ進んで許可してください（個人で配布しているアプリのため、この表示が出ます）。",
                 style = MaterialTheme.typography.bodyMedium,
             )
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }

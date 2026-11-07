@@ -16,7 +16,7 @@
 | 3 アプリ | 完了 | エミュレーターで確認（下の「確認の記録」） |
 | 4 残りの機能 | 完了 | IDE・`xdg-open`・Drive（ゲストの中の rclone）・端末のストレージ（9p）・バックアップ・1.x からの移行 |
 | 5 軽量化と安定性 | ほぼ完了 | 自動停止（5 分）、zram、free page reporting、FITRIM、時計合わせ、ネットワークが変わったときの DNS の書き直し。**アプリ経由の名前解決はやっていない**（Private DNS に従わない。端末の DNS に直接問い合わせる） |
-| 6 公開 | 実機の確認待ち | proot は消した。版は 2.0.0 |
+| 6 公開 | ストアには公開済み。**実機の確認待ち** | proot は消した。2.0.0 を 2026-11-06 に公開（実機の確認の前に公開した）。2.0.1 で Drive を自前の OAuth に変えた |
 | 7 AVF | 未定 | 実機が対応しているかを確かめてから |
 
 計画からの変更:
@@ -29,6 +29,8 @@
 残っているリスク:
 
 - 端末の空き容量が尽きると、QEMU は VM を止める（`werror` の既定）。今は通知していない。ディスクの上限（既定 32 GB、設定で変えられる）を端末の空きより小さくしておくしかない
+- **実機で動かした記録がまだ無い。** 確かめるもの: arm64 の `libqemu.so` の起動（エミュレーターで動くのは x86_64 版。CI の `guest.yml` は Ubuntu の QEMU で、`qemu.yml` はビルドまで）、9p（Armv9.2 の端末で落ちる報告がある）、速さ（4.5 の目標）、裏での動作
+- **1.x のコンテナの移行は、成功する経路を動かした記録がまだ無い。** エミュレーターでは x86_64 の中身を arm64 のゲストに移すので、`exec format error` で失敗する（失敗しても元のコンテナは残る）。成功すると元の rootfs は消える
 
 ## 1. 結論
 
@@ -289,6 +291,12 @@ main を常に公開できる状態に保つため、VM の方式は 2.0 まで�
 - **`xdg-open`**: コンテナ内で `xdg-open https://example.com` を実行し、Android 側のブラウザ（Chrome）が開くことを確認
 - **Docker**: `apt-get install docker.io iptables` で導入し、`sudo dockerd` が `overlayfs`・`cgroup v2` で起動。`sudo docker run --rm hello-world` と `sudo docker run --rm alpine wget -qO- http://example.com`（コンテナ内からの外部通信）が通ることを確認
 - **1.x からの移行**: 1.x の設定・Drive フォルダの移行と、アーキテクチャ不一致（x86_64 の 1.x コンテナを arm64 ゲストに移したとき）のエラー表示（`exec format error`）を確認
+
+2026-11-07 に公開版（2.0.0、versionCode 4）で確認:
+
+- 1.0.0 の上に入れて更新し、VM の起動、`ubuntu:24.04` の作成、`sudo whoami`（`root`）、`uname -rm`（`6.18.60-pocket aarch64`）
+- 1.x のコンテナの移行は `exec format error` で失敗し、エラーの表示とコンテナの保持を確認（上と同じ理由。約 7 分）
+- Docker と Drive の同期は、このときは試していない
 
 ## 参考
 

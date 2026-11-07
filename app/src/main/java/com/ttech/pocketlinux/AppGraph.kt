@@ -76,7 +76,7 @@ class AppGraph(val app: Application) {
 
     /** Google ドライブとの同期に使う rclone（VM の中で動く） */
     val rclone = Rclone(paths, vm, guest)
-    val legacy = LegacyMigration(paths, store, guest, containers, rclone)
+    val legacy = LegacyMigration(paths, store, guest, containers)
 
     /** Google ドライブとの双方向の自動同期（PocketLinuxApp で start する） */
     val drive = DriveSync(paths, rclone, vm, guest, scope, activity, host::isOnline, legacy::pending) {

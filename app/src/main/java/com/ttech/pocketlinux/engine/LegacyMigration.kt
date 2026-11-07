@@ -25,7 +25,7 @@ import kotlin.concurrent.thread
  *
  * - コンテナ: 端末の `files/containers/<id>/rootfs` を tar にして VM の `/data/containers/<id>` へ
  * - Drive の同期フォルダ: `files/drive` を VM の `/data/drive` へ（次の同期は両方の中身を合わせ直す）
- * - rclone の設定: `files/rclone/rclone.conf` を VM へ
+ * - rclone の設定: `files/rclone/rclone.conf` は移さずに消す（Google のログインはやり直してもらう）
  *
  * 途中で失敗しても、移し終えていないものは端末側に残るので、やり直せる。
  */
@@ -34,7 +34,6 @@ class LegacyMigration(
     private val store: ContainerStore,
     private val guest: Guest,
     private val containers: ContainerManager,
-    private val rclone: Rclone,
 ) {
     /** 移すものが残っているか */
     fun pending(): Boolean = legacyContainers().isNotEmpty() || hasLegacyDrive() || paths.legacyRcloneConfig.isFile
@@ -61,9 +60,9 @@ class LegacyMigration(
             log("Drive の同期フォルダを移しました")
         }
         if (paths.legacyRcloneConfig.isFile) {
-            rclone.importConfig(paths.legacyRcloneConfig.readText())
+            // 1.x のログインは rclone 共有のクライアントのもので、もうすぐ使えなくなるので持ち越さない
             paths.legacyRcloneConfig.delete()
-            log("Google のログイン情報を移しました")
+            log("Google のログインの方式が変わりました。Drive の画面からログインし直してください")
         }
         paths.legacyLeftovers.forEach { AndroidFileOps.deleteTree(it) }
         paths.legacyDriveDir.delete()

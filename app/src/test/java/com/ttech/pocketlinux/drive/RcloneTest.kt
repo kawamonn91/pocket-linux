@@ -8,6 +8,51 @@ import org.junit.Test
 
 class RcloneTest {
 
+    private val client = DriveClient("id-1.apps.googleusercontent.com", "secret-1")
+
+    @Test
+    fun DriveClient_IDと秘密鍵がそろって初めて設定済みになる() {
+        assertTrue(client.configured)
+        assertFalse(DriveClient("", "").configured)
+        assertFalse(DriveClient("id", "").configured)
+        assertFalse(DriveClient("", "secret").configured)
+    }
+
+    @Test
+    fun authorizeArgs_自前のクライアントを渡す() {
+        assertEquals(
+            listOf("authorize", "drive", "id-1.apps.googleusercontent.com", "secret-1", "--auth-no-open-browser"),
+            Rclone.authorizeArgs(client),
+        )
+    }
+
+    @Test
+    fun configText_クライアントとトークンを書く() {
+        assertEquals(
+            "[gdrive]\ntype = drive\nscope = drive\nclient_id = id-1.apps.googleusercontent.com\nclient_secret = secret-1\n" +
+                "token = {\"access_token\":\"x\"}\n",
+            Rclone.configText(client, """{"access_token":"x"}"""),
+        )
+    }
+
+    @Test
+    fun isLoggedInWith_今のクライアントの目印だけをログイン済みとみなす() {
+        assertTrue(Rclone.isLoggedInWith("id-1.apps.googleusercontent.com\n", client))
+        // 目印が無い・2.0.0 までの空の目印（rclone 共有のクライアント）・別のクライアント
+        assertFalse(Rclone.isLoggedInWith(null, client))
+        assertFalse(Rclone.isLoggedInWith("", client))
+        assertFalse(Rclone.isLoggedInWith("other.apps.googleusercontent.com", client))
+        // ログインの設定が入っていないビルド
+        assertFalse(Rclone.isLoggedInWith("", DriveClient("", "")))
+    }
+
+    @Test
+    fun loginError_知っている失敗の理由だけを言い換える() {
+        assertEquals("Google で許可されませんでした", Rclone.loginError("oauth2: access_denied"))
+        assertTrue(Rclone.loginError("oauth2: invalid_client")!!.contains("新しい版"))
+        assertNull(Rclone.loginError("something else"))
+    }
+
     @Test
     fun parseToken_貼り付け用のトークンを取り出す() {
         val output = """

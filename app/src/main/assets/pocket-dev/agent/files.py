@@ -9,6 +9,8 @@ import shutil
 
 # エディタで開ける最大サイズ
 MAX_TEXT_BYTES = 4 * 1024 * 1024
+# PDF・画像の表示で読める最大サイズ（BridgeServer と揃える）
+MAX_RAW_BYTES = 64 * 1024 * 1024
 # バイナリ判定に使う先頭バイト数
 SNIFF_BYTES = 8192
 
@@ -19,6 +21,10 @@ class FileServiceError(Exception):
 
 class PathOutsideRootError(FileServiceError):
     """root の外を参照しようとした"""
+
+
+class FileTooLargeError(FileServiceError):
+    """開ける大きさの上限を超えた（HTTP では 413 で返す）"""
 
 
 class FileService:
@@ -94,7 +100,7 @@ class FileService:
 
         size = os.path.getsize(target)
         if size > MAX_TEXT_BYTES:
-            raise FileServiceError(f"大きすぎて開けません ({size:,} バイト)")
+            raise FileTooLargeError(f"大きすぎて開けません（{MAX_TEXT_BYTES:,} バイトまで）")
 
         with open(target, "rb") as f:
             raw = f.read()
@@ -113,6 +119,9 @@ class FileService:
         target = self.resolve(rel_path)
         if not os.path.isfile(target):
             raise FileServiceError(f"ファイルがありません: {rel_path}")
+        size = os.path.getsize(target)
+        if size > MAX_RAW_BYTES:
+            raise FileTooLargeError(f"大きすぎて開けません（{MAX_RAW_BYTES:,} バイトまで）")
         with open(target, "rb") as f:
             data = f.read()
         mime, _ = mimetypes.guess_type(target)

@@ -8,6 +8,14 @@ val releaseSigning: Properties? = rootProject.file("keystore.properties")
     ?.let { file -> Properties().apply { file.inputStream().use(::load) } }
 
 /**
+ * Google のログインに使う OAuth クライアント。公開リポジトリには入れない（README を参照）。
+ * 無い環境（CI など）でもデバッグ版はビルドでき、Drive の画面はログインできないと表示する
+ */
+val driveOAuth: Properties? = rootProject.file("google-oauth.properties")
+    .takeIf { it.exists() }
+    ?.let { file -> Properties().apply { file.inputStream().use(::load) } }
+
+/**
  * VM の生成物（GitHub Releases に置いたもの）を、vm/artifacts.properties の版と SHA-256 で取ってきて APK に入れる。
  * - libqemu.so: ABI ごとの jniLibs（実行するので nativeLibraryDir に展開させる）
  * - カーネル・system.erofs・data.img.gz: assets/vm（ゲストは常に arm64 なので 1 組だけ。初回の起動で展開する。VmImages.kt）
@@ -90,8 +98,11 @@ android {
         applicationId = "com.ttech.pocketlinux"
         minSdk = 26
         targetSdk = 36
-        versionCode = 4
-        versionName = "2.0.0"
+        versionCode = 5
+        versionName = "2.0.1"
+
+        buildConfigField("String", "DRIVE_CLIENT_ID", "\"${driveOAuth?.getProperty("clientId").orEmpty()}\"")
+        buildConfigField("String", "DRIVE_CLIENT_SECRET", "\"${driveOAuth?.getProperty("clientSecret").orEmpty()}\"")
 
         ndk {
             // QEMU は 64bit 版だけを同梱する（VM の中も arm64 だけ）
@@ -145,6 +156,15 @@ android {
 
     testOptions {
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+// リリース版を、Google にログインできないまま配布しないように止める
+val hasDriveOAuth = driveOAuth != null
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    val configured = hasDriveOAuth
+    doFirst {
+        check(configured) { "google-oauth.properties がありません（README の「Google のログインの設定」を参照）" }
     }
 }
 

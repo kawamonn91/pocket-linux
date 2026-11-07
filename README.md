@@ -31,6 +31,20 @@ Android デバイス上で動作する、root 不要の Linux 環境・ターミ
 
 単体テストは `./gradlew :app:testDebugUnitTest` で実行します。PR では GitHub Actions で同じテスト・lint・ビルドが走り、通ると自動でマージされます（[docs/ci.md](docs/ci.md)）。
 
+## Google のログインの設定
+
+rclone 共有の client_id は 2026 年中に使えなくなり（[rclone の案内](https://rclone.org/drive/#making-your-own-client-id)）、利用者全員で上限を分け合うので `rateLimitExceeded` も出やすいため、自前の OAuth クライアントを使います（pocket-dev アプリと同じクライアント）。
+
+- リポジトリの直下に `google-oauth.properties` を置く（Git の対象外。公開リポジトリには入れない）
+
+  ```properties
+  clientId=xxxx.apps.googleusercontent.com
+  clientSecret=xxxx
+  ```
+
+- 無くてもデバッグ版はビルドでき、Drive の画面はログインできないと表示します。リリース版のビルドは、無いと止まります
+- 2.0.0 までのログイン（rclone 共有のクライアント）はトークンを更新できないので引き継がず、トップ画面のお知らせからログインし直してもらいます。同期するフォルダの設定と中身は残ります
+
 ## 開発の状況
 
 決定事項と進み具合は [docs/plan.md](docs/plan.md) と [docs/vm-plan.md](docs/vm-plan.md) にあります。アプリと VM の中のエージェントの約束事は [docs/vm-protocol.md](docs/vm-protocol.md) です。同梱するもののライセンスは、アプリの「設定 → オープンソースのライセンス」と `third_party/` にあります。

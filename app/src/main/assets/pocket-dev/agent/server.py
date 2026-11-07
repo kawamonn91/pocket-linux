@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from . import auth, websocket
-from .files import FileService, FileServiceError, PathOutsideRootError
+from .files import FileService, FileServiceError, FileTooLargeError, PathOutsideRootError
 from .pty_session import PtySession
 
 log = logging.getLogger("pocket-dev")
@@ -168,11 +168,16 @@ class AgentHandler(BaseHTTPRequestHandler):
                     "root": self.config.root,
                     "shell": self.config.shell,
                     "hostname": socket.gethostname(),
+                    # IDE はこれを見て、ターミナルと「実行」のボタンを出すか決める。
+                    # Google ドライブ直結（pocket-dev アプリ）のように編集しかできない接続先は false を返す
+                    "terminal": True,
                 })
             else:
                 self._send_error_json(404, "不明なエンドポイントです")
         except PathOutsideRootError as e:
             self._send_error_json(403, str(e))
+        except FileTooLargeError as e:
+            self._send_error_json(413, str(e))
         except FileServiceError as e:
             self._send_error_json(400, str(e))
 
@@ -221,6 +226,8 @@ class AgentHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": True, **handler()})
         except PathOutsideRootError as e:
             self._send_error_json(403, str(e))
+        except FileTooLargeError as e:
+            self._send_error_json(413, str(e))
         except FileServiceError as e:
             self._send_error_json(400, str(e))
 

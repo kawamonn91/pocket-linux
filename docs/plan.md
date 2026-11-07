@@ -36,7 +36,7 @@ Termux は sudo が使えないため、自作する。
   - ローカルの変更は数秒後に送り、Drive 側の変更は数分おきとアプリを開いたときに取り込む
   - `node_modules`・`.venv` などは同期しない（既定の除外リストを画面で編集できる）
   - rclone の Linux 版は Android 上で直接動かす。名前解決（`/etc/resolv.conf` が無い）はアプリ内の CONNECT プロキシ（`HTTPS_PROXY`）で、証明書は `SSL_CERT_DIR` で解決する（確認済み）
-  - ログインは rclone の Google 承認済みの仕組みを使う（同意画面には「rclone」と出る）。自前の Google Cloud 登録は不要
+  - ログインは rclone の Google 承認済みの仕組みを使う（同意画面には「rclone」と出る）。自前の Google Cloud 登録は不要（**2.0.1 で自前の OAuth クライアントに変えた。** rclone 共有の client_id が 2026 年中に使えなくなるため。README の「Google のログインの設定」）
 - 初版に入れる: 端末ストレージ参照（`~/storage`）、コンテナのバックアップ・復元（tar.gz）、物理キーボードのショートカット、起動時の自動実行
 - 日本語入力: 端末に直接打つほか、確定してから送る「文字入力欄」を用意する
 - IDE 用の窓口: pocket-dev のサーバー（Python）をコンテナ内で動かす。既定は端末内のみ、設定で LAN・Tailscale から許可（トークン必須）

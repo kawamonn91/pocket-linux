@@ -1,5 +1,6 @@
 package com.ttech.pocketlinux.drive
 
+import com.ttech.pocketlinux.BuildConfig
 import com.ttech.pocketlinux.engine.Paths
 import com.ttech.pocketlinux.vm.AgentChannel
 import com.ttech.pocketlinux.vm.Guest
@@ -18,15 +19,40 @@ import java.io.File
 import java.io.IOException
 
 /**
- * VM の中の rclone（system.erofs に入っている）を動かす。設定は VM のデータ用ディスクに置く。
- * Google のログインは rclone の承認済みの仕組みを使う（同意画面には「rclone」と出る）。
+ * Google のログインに使う OAuth クライアント。build.gradle.kts が google-oauth.properties から
+ * BuildConfig に入れる（rclone 共有のクライアントは 2026 年中に使えなくなるので使わない）。
+ * 秘密鍵がログに出ないよう、data class にしない。
  */
-class Rclone(private val paths: Paths, private val vm: VmManager, private val guest: Guest) {
+class DriveClient(val id: String, val secret: String) {
+    val configured: Boolean get() = id.isNotBlank() && secret.isNotBlank()
 
-    /** ログインしたかの目印。設定は VM の中にあるので、これを見れば VM を起動しなくて済む */
+    companion object {
+        val BUILT_IN: DriveClient get() = DriveClient(BuildConfig.DRIVE_CLIENT_ID, BuildConfig.DRIVE_CLIENT_SECRET)
+    }
+}
+
+/**
+ * VM の中の rclone（system.erofs に入っている）を動かす。設定は VM のデータ用ディスクに置く。
+ * Google のログインは [DriveClient] を使う（同意画面には「T-tech Pocket」と出る）。
+ */
+class Rclone(
+    private val paths: Paths,
+    private val vm: VmManager,
+    private val guest: Guest,
+    private val client: DriveClient = DriveClient.BUILT_IN,
+) {
+
+    /**
+     * ログインしたかの目印。中身はログインに使ったクライアントの ID。
+     * 設定は VM の中にあるので、これを見れば VM を起動しなくて済む
+     */
     private val loggedInMarker = File(paths.rcloneDir, "logged-in")
 
-    val isLoggedIn: Boolean get() = loggedInMarker.isFile || paths.legacyRcloneConfig.isFile
+    /** このビルドに Google のログインの設定が入っているか */
+    val configured: Boolean get() = client.configured
+
+    val isLoggedIn: Boolean
+        get() = isLoggedInWith(runCatching { loggedInMarker.readText() }.getOrNull(), client)
 
     private fun request(args: List<String>) = OpenRequest(
         op = "exec",
@@ -48,9 +74,14 @@ class Rclone(private val paths: Paths, private val vm: VmManager, private val gu
      * ログインの間だけ、QEMU のポート転送とエージェントの proxy でつなぐ。
      */
     suspend fun login(openUrl: (String) -> Unit, log: (String) -> Unit) {
+        if (!client.configured) throw IOException(NOT_CONFIGURED)
         val channel = vm.channel()
         runCatching { vm.qmp.removeForward(LOCALHOST, AUTH_PORT) }
-        vm.qmp.addForward(LOCALHOST, AUTH_PORT)
+        try {
+            vm.qmp.addForward(LOCALHOST, AUTH_PORT)
+        } catch (e: IOException) {
+            throw IOException("ほかのアプリ（pocket-dev など）が Google のログインの途中かもしれません。そちらを終えてからやり直してください", e)
+        }
         val proxy: AgentChannel.GuestSession = channel.open(
             OpenRequest(op = "proxy", listen = "${QemuLauncher.GUEST_ADDRESS}:$AUTH_PORT", target = "$LOCALHOST:$AUTH_PORT"),
             object : GuestListener {},
@@ -59,7 +90,7 @@ class Rclone(private val paths: Paths, private val vm: VmManager, private val gu
             val output = StringBuilder()
             var opened = false
             var inToken = false
-            val exit = run(listOf("authorize", "drive", "--auth-no-open-browser")) { line ->
+            val exit = run(authorizeArgs(client)) { line ->
                 if (!opened) AUTH_URL.find(line)?.let { opened = true; openUrl(it.value) }
                 output.appendLine(line)
                 when {
@@ -69,19 +100,15 @@ class Rclone(private val paths: Paths, private val vm: VmManager, private val gu
                 }
             }
             val token = parseToken(output.toString())
-                ?: throw IOException("ログインできませんでした（終了コード $exit）")
-            importConfig("[$REMOTE]\ntype = drive\nscope = drive\ntoken = $token\n")
+                ?: throw IOException(loginError(output.toString()) ?: "ログインできませんでした（終了コード $exit）")
+            // 設定を VM に書いて、ログインした状態にする
+            guest.writeFile(null, GUEST_CONFIG, configText(client, token), mode = "600".toInt(8))
+            paths.rcloneDir.mkdirs()
+            loggedInMarker.writeText(client.id)
         } finally {
             runCatching { proxy.close() }
             runCatching { vm.qmp.removeForward(LOCALHOST, AUTH_PORT) }
         }
-    }
-
-    /** 設定を VM に書いて、ログインした状態にする */
-    suspend fun importConfig(text: String) {
-        guest.writeFile(null, GUEST_CONFIG, text, mode = "600".toInt(8))
-        paths.rcloneDir.mkdirs()
-        loggedInMarker.writeText("")
     }
 
     suspend fun logout() {
@@ -116,6 +143,30 @@ class Rclone(private val paths: Paths, private val vm: VmManager, private val gu
         private const val TOKEN_BEGIN = "--->"
         private const val TOKEN_END = "<---End paste"
         private val json = Json { ignoreUnknownKeys = true }
+
+        const val NOT_CONFIGURED = "この版には Google へのログインの設定が入っていません"
+
+        fun authorizeArgs(client: DriveClient): List<String> =
+            listOf("authorize", "drive", client.id, client.secret, "--auth-no-open-browser")
+
+        fun configText(client: DriveClient, token: String): String =
+            "[$REMOTE]\ntype = drive\nscope = drive\nclient_id = ${client.id}\nclient_secret = ${client.secret}\ntoken = $token\n"
+
+        /**
+         * 今のクライアントでログインしているか（[marker] はログインの目印の中身。無ければ null）。
+         * トークンは取ったクライアントでしか更新できない。2.0.0 までの目印は空で、rclone 共有の
+         * クライアントのログインなので、ログインし直してもらう
+         */
+        fun isLoggedInWith(marker: String?, client: DriveClient): Boolean =
+            client.configured && marker?.trim() == client.id
+
+        /** ログインに失敗したときの出力から、利用者に見せる理由を作る */
+        fun loginError(output: String): String? = when {
+            output.contains("access_denied") -> "Google で許可されませんでした"
+            output.contains("invalid_client") || output.contains("deleted_client") ->
+                "この版のログインの設定は使えなくなっています。アプリを新しい版に更新してください"
+            else -> null
+        }
 
         fun remote(path: String): String = "$REMOTE:" + path.trim('/')
 

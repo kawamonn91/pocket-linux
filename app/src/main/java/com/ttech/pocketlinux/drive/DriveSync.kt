@@ -51,6 +51,8 @@ class DriveSync(
 
     data class State(
         val loggedIn: Boolean = false,
+        /** このビルドに Google のログインの設定が入っているか */
+        val loginConfigured: Boolean = true,
         val loggingIn: Boolean = false,
         /** 最後のログインが失敗した理由（成功したら消す） */
         val loginError: String? = null,
@@ -82,6 +84,7 @@ class DriveSync(
         _state.update {
             it.copy(
                 loggedIn = rclone.isLoggedIn,
+                loginConfigured = rclone.configured,
                 pairs = store.load().map { pair -> PairState(pair) },
                 excludes = excludesFile.readText(),
             )

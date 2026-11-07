@@ -113,7 +113,7 @@ class MainActivity : ComponentActivity() {
         val drive by graph.drive.state.collectAsState()
         val ide by graph.ide.state.collectAsState()
         val vm by graph.vm.status.collectAsState()
-        val notices = remember(noticeVersion) { buildNotices() }
+        val notices = remember(noticeVersion, drive.loggedIn, drive.pairs.isEmpty()) { buildNotices() }
 
         when (val current = screen) {
             Screen.Home -> HomeScreen(
@@ -401,6 +401,14 @@ class MainActivity : ComponentActivity() {
                     "大きさによって数分〜数十分かかり、終わるまでは端末の空き容量を余分に使います。",
                 actionLabel = "移す",
                 onAction = { startMigration() },
+            ))
+        } else if (!migrating && graph.drive.state.value.let { !it.loggedIn && it.pairs.isNotEmpty() }) {
+            add(Notice(
+                id = "drive-login",
+                title = "Google ドライブの同期が止まっています",
+                body = "Google にログインし直すと再開します。同期するフォルダの設定と中身はそのまま残っています。",
+                actionLabel = "開く",
+                onAction = { screen = Screen.Drive },
             ))
         }
     }

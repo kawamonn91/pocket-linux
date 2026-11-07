@@ -11,6 +11,8 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+# Google のログインに使う OAuth クライアント（README の「Google のログインの設定」）
+google-oauth.properties
 
 # rclone のビルドに取ってきたソース（scripts/build-rclone.sh）
 third_party/rclone-build/

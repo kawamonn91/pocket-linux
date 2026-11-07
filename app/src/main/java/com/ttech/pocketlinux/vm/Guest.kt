@@ -141,8 +141,14 @@ class Guest(private val vm: VmManager) {
         )
     }
 
-    suspend fun mkdir(container: String?, path: String) {
-        require(OpenRequest(op = "mkdir", container = container, path = path))
+    /** フォルダを作る。[mode] を付けると、すでにあるフォルダもその権限にする */
+    suspend fun mkdir(container: String?, path: String, mode: Int? = null) {
+        require(OpenRequest(op = "mkdir", container = container, path = path, mode = mode))
+    }
+
+    /** VM のルートの [path] の下を、どのコンテナのユーザーからも読み書きできる権限にする */
+    suspend fun share(path: String) {
+        require(OpenRequest(op = "share", path = path))
     }
 
     suspend fun remove(container: String?, path: String) {

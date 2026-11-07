@@ -56,6 +56,8 @@ class LegacyMigration(
             runCatching { HardLinkGuard.materialize(paths.legacyDriveDir) }
                 .onFailure { log("Drive のフォルダのハードリンクを戻せませんでした（${it.message}）") }
             stream(paths.legacyDriveDir, Rclone.GUEST_DRIVE_DIR, onSkip = onSkip) { bytes -> progress("Drive の同期フォルダを移しています（${ContainerManager.formatBytes(bytes)}）") }
+            // tar の中身は root の権限で展開されるので、コンテナのユーザーが編集できるようにする
+            guest.share(Rclone.GUEST_DRIVE_DIR)
             AndroidFileOps.deleteTree(paths.legacyDriveDir)
             log("Drive の同期フォルダを移しました")
         }

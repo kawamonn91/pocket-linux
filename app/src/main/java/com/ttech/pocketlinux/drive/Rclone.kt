@@ -58,6 +58,8 @@ class Rclone(
         op = "exec",
         argv = listOf(RCLONE, "--config", GUEST_CONFIG, "--cache-dir", "$GUEST_DIR/cache") + args,
         cwd = GUEST_DIR,
+        // rclone は root で動く。同期したものをコンテナのユーザーが編集できるよう、umask 0 で動かす
+        shared = true,
     )
 
     /** 1行ずつ受け取りながら動かす（同期など）。終了コードを返す */

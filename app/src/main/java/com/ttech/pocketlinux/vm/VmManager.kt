@@ -297,7 +297,7 @@ class VmManager(
         private const val TAG = "VmManager"
 
         /** エージェントの版（vm/agent/main.go の Version）。組み合わせが変わったら一緒に上げる */
-        const val AGENT_VERSION = "1"
+        const val AGENT_VERSION = "2"
 
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val BOOT_TIMEOUT_MS = 180_000L

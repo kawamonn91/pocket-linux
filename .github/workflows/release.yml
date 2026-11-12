@@ -1,0 +1,101 @@
+# CD。v で始まるタグ（v1.2.3 など）を push すると、署名済みのリリース版を作って GitHub Releases に置く（docs/ci.md の「CD」）。
+# 手動で動かした（workflow_dispatch）ときは、署名済みのビルドと署名の確かめまでにして、リリースは作らない（CD の動作確認用）。
+# T-tech Store への公開は、ここで作った APK を手元から appstore の publish-app.mjs で行う（本番の鍵を GitHub に置かないため）。
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # ストアに出している版と同じ鍵か（証明書の SHA-256。APK から誰でも読める値なので、ここに書いてよい）
+  EXPECTED_CERT_SHA256: 522b6c719fc71fd17f813836cd46ac48b8871a1155978e5d9a77b278f87c7590
+
+jobs:
+  release:
+    name: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      # アクションは改ざんに備えてコミットの SHA で固定する（コメントは版）
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      # Gradle の準備とキャッシュ。gradle-wrapper.jar が公式のものかも確かめる
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+
+      # 足りない SDK（compileSdk 37）と NDK は AGP が取得する。VM の生成物は vm/artifacts.properties の版で Releases から取る
+
+      - name: 版を読む（タグのときは、タグと合っているか確かめる）
+        run: |
+          version="$(sed -nE 's/^[[:space:]]*versionName[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          if [ -z "$version" ]; then echo "::error::app/build.gradle.kts から versionName を読めません"; exit 1; fi
+          echo "versionName: $version / ref: $GITHUB_REF_NAME"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::タグ（$GITHUB_REF_NAME）が app/build.gradle.kts の versionName（$version）と合いません"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      # 署名鍵と設定は GitHub Secrets から書き出す（ログに出さない。終わったら消す）
+      - name: 署名鍵と設定を書き出す
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          OAUTH_CLIENT_ID: ${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+          OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: |
+          for name in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD OAUTH_CLIENT_ID OAUTH_CLIENT_SECRET; do
+            if [ -z "${!name}" ]; then echo "::error::GitHub Secrets の $name がありません（docs/ci.md）"; exit 1; fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "storeFile=$RUNNER_TEMP/release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > keystore.properties
+          printf 'clientId=%s\nclientSecret=%s\n' "$OAUTH_CLIENT_ID" "$OAUTH_CLIENT_SECRET" > google-oauth.properties
+
+      # AGP 9 では単体テストはテスト対象のビルドタイプ（debug）にだけ作られる（testReleaseUnitTest は無い）
+      - name: 単体テストとリリース版のビルド
+        run: ./gradlew --console=plain :app:testDebugUnitTest :app:assembleRelease
+
+      - name: 署名を確かめて、置くものを集める
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)/apksigner"
+          "$apksigner" verify --print-certs "$apk" | tee "$RUNNER_TEMP/certs.txt" | grep -E "certificate (DN|SHA-256)"
+          if ! grep -qi "certificate SHA-256 digest: $EXPECTED_CERT_SHA256" "$RUNNER_TEMP/certs.txt"; then
+            echo "::error::ストアに出している版と違う鍵で署名されています（GitHub Secrets の鍵を確かめる）"
+            exit 1
+          fi
+          mkdir dist
+          cp "$apk" "dist/pocket-linux-$VERSION.apk"
+          (cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS)
+
+      - name: リリースを作る
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --target "$GITHUB_SHA" --title "Pocket Linux $VERSION" \
+            --notes "署名済みのリリース版（コミット $GITHUB_SHA）。T-tech Store への公開は docs/ci.md の「CD」の手順で行う。"
+
+      - name: 署名鍵を消す
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" keystore.properties google-oauth.properties

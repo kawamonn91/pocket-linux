@@ -98,8 +98,8 @@ android {
         applicationId = "com.ttech.pocketlinux"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "2.0.1"
+        versionCode = 6
+        versionName = "2.1.0"
 
         buildConfigField("String", "DRIVE_CLIENT_ID", "\"${driveOAuth?.getProperty("clientId").orEmpty()}\"")
         buildConfigField("String", "DRIVE_CLIENT_SECRET", "\"${driveOAuth?.getProperty("clientSecret").orEmpty()}\"")

@@ -357,8 +357,8 @@ private val IMAGE_SUGGESTIONS = listOf(
     "ubuntu:24.04", "debian:trixie", "python:3.13-slim", "node:22-bookworm-slim", "alpine:3.22", "golang:1.25",
 )
 
-/** C・Java・Python を選んだときの、かかる時間と量の目安（ubuntu:24.04 で計った値） */
-private const val DEV_TOOLS_NOTE = "C・Java・Python を入れると 10〜30 分ほどかかり、通信量は約 250MB、容量は約 800MB 使います。"
+/** C・Java・Python を選んだときの、かかる時間と量の目安（ubuntu:24.04。CI の arm64 の TCG で約 6 分・約 1GB） */
+private const val DEV_TOOLS_NOTE = "C・Java・Python を入れると 5〜15 分ほどかかり、通信量は約 250MB、コンテナの大きさは約 1GB になります。"
 
 /** 行のどこを押しても切り替わるチェックボックス */
 @Composable

@@ -4,6 +4,35 @@ import com.ttech.pocketlinux.vm.Guest
 import com.ttech.pocketlinux.vm.GuestCommands
 import java.util.concurrent.TimeUnit
 
+/** コンテナの初期設定で、sudo のほかに入れるもの */
+data class SetupOptions(
+    /** よく使うツール（curl・git・nano・less など） */
+    val tools: Boolean = false,
+    /** 日本語環境（ja_JP.UTF-8 の表示と日本時間） */
+    val japanese: Boolean = false,
+    /** C・Java・Python の開発環境（gcc・make・JDK・pip・venv） */
+    val devTools: Boolean = false,
+) {
+    /** 進み具合に出す「〜を入れています」の〜の部分 */
+    fun label(): String = buildList {
+        add("sudo")
+        if (tools) add("よく使うツール")
+        if (japanese) add("日本語環境")
+        if (devTools) add("C・Java・Python")
+    }.joinToString("、")
+
+    companion object {
+        /** 初期設定のやり直し・復元のとき（sudo だけ） */
+        val SUDO_ONLY = SetupOptions()
+
+        /** 作成画面の初めの選択 */
+        val DEFAULT = SetupOptions(tools = true, japanese = true, devTools = true)
+    }
+}
+
+/** パッケージを入れた結果。[skipped] は入れられなかった任意のもの（日本語環境・C・Java・Python） */
+data class InstallResult(val exit: Int, val skipped: List<String>)
+
 /**
  * コンテナの中に、Pocket Linux で動かすためのファイルと一般ユーザーを作る。
  * パスワードなどのファイルは useradd が無いイメージ（Alpine など）でも動くよう直接書き換え、
@@ -26,9 +55,24 @@ class ContainerSetup(private val guest: Guest) {
         }
     }
 
-    /** sudo などを入れる。終了コードを返す */
-    suspend fun installPackages(config: ContainerConfig, installTools: Boolean, log: (String) -> Unit): Int =
-        guest.run(GuestCommands.rootScript(config, packageInstallScript(installTools)), log)
+    /**
+     * sudo と、[options] で選んだものを入れる。日本語環境・C・Java・Python は入れられなくても失敗にせず、
+     * [InstallResult.skipped] で知らせる。[onStep] には、いま何を入れているか（スクリプトの「== 」の行）が届く。
+     */
+    suspend fun installPackages(
+        config: ContainerConfig,
+        options: SetupOptions,
+        log: (String) -> Unit,
+        onStep: (String) -> Unit = {},
+    ): InstallResult {
+        val skipped = mutableListOf<String>()
+        val exit = guest.run(GuestCommands.rootScript(config, packageInstallScript(options))) { line ->
+            parseSkipped(line)?.let { skipped += it }
+            line.removePrefix(STEP_PREFIX).takeIf { it != line }?.let(onStep)
+            log(line)
+        }
+        return InstallResult(exit, skipped)
+    }
 
     /** パッケージを入れた後に、一般ユーザーと sudo の設定を作る */
     suspend fun createUser(config: ContainerConfig, nowMillis: Long = System.currentTimeMillis()) {
@@ -117,37 +161,30 @@ class ContainerSetup(private val guest: Guest) {
             |echo "ブラウザで開きました: ${'$'}1"
             |""".trimMargin()
 
-        /** sudo（と、選んだ場合はよく使うツール）を入れるスクリプト。root で実行する */
-        fun packageInstallScript(installTools: Boolean): String {
-            val apt = if (installTools) "ca-certificates curl git nano less procps" else ""
-            val apk = if (installTools) "bash ca-certificates curl git nano less procps" else ""
-            val dnf = if (installTools) "ca-certificates curl git nano less procps-ng" else ""
-            return """
-                |set -e
-                |if command -v apt-get >/dev/null 2>&1; then
-                |  echo "== パッケージの一覧を更新しています"
-                |  apt-get update
-                |  echo "== sudo などを入れています"
-                |  apt-get install -y --no-install-recommends sudo $apt
-                |elif command -v apk >/dev/null 2>&1; then
-                |  echo "== sudo などを入れています"
-                |  apk add --no-cache sudo $apk
-                |elif command -v dnf >/dev/null 2>&1; then
-                |  dnf install -y sudo $dnf
-                |elif command -v microdnf >/dev/null 2>&1; then
-                |  microdnf install -y sudo $dnf
-                |elif command -v zypper >/dev/null 2>&1; then
-                |  zypper --non-interactive install sudo $apt
-                |elif command -v pacman >/dev/null 2>&1; then
-                |  pacman -Sy --noconfirm sudo $apt
-                |else
-                |  echo "パッケージマネージャーが見つからないため、sudo を入れられませんでした" >&2
-                |  exit 3
-                |fi
-                |command -v sudo >/dev/null
-                |echo "== 完了"
-                |""".trimMargin()
+        /** スクリプトの、いま何をしているかを知らせる行の頭 */
+        private const val STEP_PREFIX = "== "
+
+        /** スクリプトの、入れられなかったものを知らせる行の頭（install-packages.sh の skip と合わせる） */
+        private const val SKIPPED_PREFIX = "!! 入れられませんでした: "
+
+        /** 本体は resources の install-packages.sh（R8 がクラスの場所を変えても読めるよう、絶対パスで読む） */
+        private val INSTALL_SCRIPT: String by lazy {
+            val stream = ContainerSetup::class.java.getResourceAsStream("/pocketlinux/install-packages.sh")
+                ?: error("install-packages.sh が APK に入っていません")
+            stream.use { it.readBytes().toString(Charsets.UTF_8) }.replace("\r\n", "\n")
         }
+
+        /** sudo と、[options] で選んだものを入れるスクリプト。root で実行する */
+        fun packageInstallScript(options: SetupOptions): String = buildString {
+            fun flag(on: Boolean) = if (on) "1" else "0"
+            appendLine("POCKET_TOOLS=${flag(options.tools)}")
+            appendLine("POCKET_JAPANESE=${flag(options.japanese)}")
+            appendLine("POCKET_DEV=${flag(options.devTools)}")
+            append(INSTALL_SCRIPT)
+        }
+
+        fun parseSkipped(line: String): String? =
+            line.takeIf { it.startsWith(SKIPPED_PREFIX) }?.removePrefix(SKIPPED_PREFIX)?.trim()?.ifEmpty { null }
 
         /** ホームフォルダを作り、/etc/skel の初期ファイルとリンクを置いて、持ち主を一般ユーザーにする */
         fun homeScript(home: String, uid: Int): String = """

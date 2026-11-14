@@ -21,6 +21,7 @@ import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import com.ttech.pocketlinux.engine.ContainerConfig
 import com.ttech.pocketlinux.engine.ContainerManager
+import com.ttech.pocketlinux.engine.SetupOptions
 import com.ttech.pocketlinux.service.ContainerService
 import com.ttech.pocketlinux.terminal.TerminalController
 import com.ttech.pocketlinux.ui.HomeActions
@@ -155,11 +156,13 @@ class MainActivity : ComponentActivity() {
     // ------------------------------------------------------------ トップ画面の操作
 
     private val homeActions = object : HomeActions {
-        override fun createContainer(image: String, name: String, installTools: Boolean) {
+        override fun createContainer(image: String, name: String, options: SetupOptions) {
             ContainerService.ensureRunning(this@MainActivity)
             graph.tasks.start(graph.scope, "コンテナを作成: $image") {
-                val config = graph.containers.create(image, name, installTools, asProgress()) { log(it) }
-                "「${config.name}」を作成しました"
+                val result = graph.containers.create(image, name, options, asProgress()) { log(it) }
+                val skipped = result.skipped.takeIf { it.isNotEmpty() }
+                    ?.let { "（${it.joinToString("・")} は入れられませんでした。ログを確認してください）" }
+                "「${result.config.name}」を作成しました${skipped.orEmpty()}"
             }
         }
 
@@ -180,7 +183,7 @@ class MainActivity : ComponentActivity() {
             if (refuseLegacy(containerId)) return
             ContainerService.ensureRunning(this@MainActivity)
             graph.tasks.start(graph.scope, "初期設定: ${config.name}") {
-                val updated = graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
+                val updated = graph.containers.runSetup(config, SetupOptions.SUDO_ONLY, asProgress()) { log(it) }.config
                 if (updated.sudoInstalled) "sudo を使えるようになりました" else "sudo を入れられませんでした（ログを確認してください）"
             }
         }
@@ -265,7 +268,7 @@ class MainActivity : ComponentActivity() {
                 graph.backups.import(stream, fallbackName) { read -> progress("読み込み中（${ContainerManager.formatBytes(read)}）") }
             }
             if (!config.setupDone) {
-                graph.containers.runSetup(config, installTools = false, asProgress()) { log(it) }
+                graph.containers.runSetup(config, SetupOptions.SUDO_ONLY, asProgress()) { log(it) }
             }
             "「${config.name}」として復元しました"
         }

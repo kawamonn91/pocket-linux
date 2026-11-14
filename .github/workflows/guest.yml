@@ -1,5 +1,5 @@
 # VM のゲスト（カーネル・system.erofs・pocket-agent）をビルドし、QEMU で起動して確かめる。
-# ゲストまわりを変えた PR と、main への push のときだけ動く。
+# ゲストまわり（とコンテナの初期設定のスクリプト）を変えた PR と、main への push のときだけ動く。
 # 本番と同じく arm64 の上で TCG（ソフトウェア）で動かすので、速さの目安にもなる。
 name: guest
 
@@ -8,11 +8,13 @@ on:
     branches: [main]
     paths:
       - "vm/**"
+      - "app/src/main/resources/pocketlinux/install-packages.sh"
       - ".github/workflows/guest.yml"
   push:
     branches: [main]
     paths:
       - "vm/**"
+      - "app/src/main/resources/pocketlinux/install-packages.sh"
       - ".github/workflows/guest.yml"
   workflow_dispatch:
   # vm-release.yml から呼ぶ

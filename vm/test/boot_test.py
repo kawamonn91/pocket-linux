@@ -27,7 +27,11 @@ CMDLINE = ("console=hvc0 root=/dev/vda rootfstype=erofs ro init=/sbin/pocket-age
 ENV = ["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "HOME=/root", "LANG=C.UTF-8",
        "TERM=xterm-256color", "DEBIAN_FRONTEND=noninteractive"]
 UBUNTU = "ubuntu"
+SETUP = "setup"
 PROXY_PORT = 18081
+# アプリがコンテナの初期設定で動かすスクリプト（ContainerSetup.kt が読む）
+INSTALL_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..",
+                              "app", "src", "main", "resources", "pocketlinux", "install-packages.sh")
 
 
 class Vm:
@@ -402,6 +406,55 @@ def test_backup(vm):
     check("消したコンテナは起動できない", r.exit["code"] != 0, str(r.exit))
 
 
+def test_setup_script(vm, rootfs):
+    """アプリの初期設定のスクリプト（install-packages.sh）で、日本語環境と C・Java・Python を入れる。
+
+    中身が 1 GB 近く増えるので、ほかのテストとは別のコンテナで確かめて、最後に消す。
+    """
+    with tar_stream(rootfs) as f:
+        r = vm.call({"op": "untar", "container": SETUP}, stdin=f, timeout=900)
+    check_exit("初期設定用のコンテナを展開できる", r)
+    with open(INSTALL_SCRIPT, encoding="utf-8") as f:
+        script = "POCKET_TOOLS=1\nPOCKET_JAPANESE=1\nPOCKET_DEV=1\n" + f.read()
+
+    t0 = time.time()
+    r = vm.run(script, container=SETUP, timeout=3600)
+    seconds = time.time() - t0
+    check_exit("初期設定のスクリプトが通る", r)
+    err = bytes(r.stderr).decode("utf-8", "replace")
+    check("入れられなかったものが無い", "入れられませんでした" not in err, err[-1500:])
+    r = vm.call({"op": "du", "container": SETUP})
+    size = json.loads(r.stdout)["bytes"] >> 20 if r.exit and r.exit.get("code") == 0 else -1
+    print(f"     sudo・ツール・日本語環境・C・Java・Python: {seconds:.0f} 秒、コンテナの大きさ {size} MiB", flush=True)
+
+    r = vm.run("useradd -m -s /bin/bash user", container=SETUP)
+    check_exit("user を作れる", r)
+    r = vm.run("su -l user -c 'echo \"LANG=$LANG\"; date +%Z; ls /nonexistent 2>&1; true'", container=SETUP)
+    check("ログインシェルが日本語", "LANG=ja_JP.UTF-8" in r.text, r.text)
+    check("日本時間", "\nJST\n" in r.text, r.text)
+    check("メッセージが日本語", "そのようなファイルやディレクトリはありません" in r.text, r.text)
+
+    r = vm.run("cd /tmp && printf '#include <stdio.h>\\nint main(void){puts(\"C OK\");return 0;}\\n' > hello.c"
+               " && gcc hello.c -o hello && ./hello", container=SETUP, timeout=600)
+    check("C をコンパイルして動かせる", r.text.strip() == "C OK", f"{r.text!r} {bytes(r.stderr)[-600:]!r}")
+
+    t0 = time.time()
+    r = vm.run("cd /tmp && printf 'public class Hello { public static void main(String[] a) {"
+               " System.out.println(\"Java OK\"); } }\\n' > Hello.java && javac Hello.java && java Hello",
+               container=SETUP, timeout=600)
+    check("Java をコンパイルして動かせる", r.text.strip() == "Java OK", f"{r.text!r} {bytes(r.stderr)[-600:]!r}")
+    print(f"     javac と java: {time.time() - t0:.1f} 秒", flush=True)
+
+    r = vm.run("su -l user -c 'python3 -m venv ~/venv && ~/venv/bin/pip --version >/dev/null"
+               " && ~/venv/bin/python -c \"print(\\\"Python OK\\\")\"'", container=SETUP, timeout=600)
+    check("Python の venv を作れる", r.text.strip() == "Python OK", f"{r.text!r} {bytes(r.stderr)[-600:]!r}")
+
+    r = vm.call({"op": "stop", "container": SETUP})
+    check_exit("初期設定用のコンテナを止める", r)
+    r = vm.call({"op": "delete", "container": SETUP})
+    check_exit("初期設定用のコンテナを消す", r)
+
+
 def test_persistence(vm):
     r = vm.run("echo persisted > /root/keep && sync")
     check_exit("ファイルを書く", r)
@@ -459,6 +512,7 @@ def main():
         test_drive_permissions(vm)
         test_events_and_network(vm)
         test_backup(vm)
+        test_setup_script(vm, args.rootfs)
         test_persistence(vm)
         code = 1 if failures else 0
     except Exception as ex:  # noqa: BLE001

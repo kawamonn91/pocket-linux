@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -54,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -63,13 +65,14 @@ import androidx.compose.ui.unit.dp
 import com.ttech.pocketlinux.TaskTracker
 import com.ttech.pocketlinux.engine.ContainerConfig
 import com.ttech.pocketlinux.engine.ImageRef
+import com.ttech.pocketlinux.engine.SetupOptions
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /** トップ画面の操作（実際の処理は MainActivity 側の HomeActions で行う） */
 interface HomeActions {
-    fun createContainer(image: String, name: String, installTools: Boolean)
+    fun createContainer(image: String, name: String, options: SetupOptions)
     fun openShell(containerId: String, asRoot: Boolean)
     fun rerunSetup(containerId: String)
     fun rename(containerId: String, name: String)
@@ -143,9 +146,9 @@ fun HomeScreen(
     if (showCreate) {
         CreateContainerDialog(
             onDismiss = { showCreate = false },
-            onCreate = { image, name, tools ->
+            onCreate = { image, name, options ->
                 showCreate = false
-                actions.createContainer(image, name, tools)
+                actions.createContainer(image, name, options)
             },
         )
     }
@@ -354,12 +357,34 @@ private val IMAGE_SUGGESTIONS = listOf(
     "ubuntu:24.04", "debian:trixie", "python:3.13-slim", "node:22-bookworm-slim", "alpine:3.22", "golang:1.25",
 )
 
+/** C・Java・Python を選んだときの、かかる時間と量の目安（ubuntu:24.04 で計った値） */
+private const val DEV_TOOLS_NOTE = "C・Java・Python を入れると 10〜30 分ほどかかり、通信量は約 250MB、容量は約 800MB 使います。"
+
+/** 行のどこを押しても切り替わるチェックボックス */
+@Composable
+private fun SetupOptionRow(title: String, detail: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Checkbox(checked = checked, onCheckedChange = null)
+        Spacer(Modifier.width(12.dp))
+        Column {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CreateContainerDialog(onDismiss: () -> Unit, onCreate: (String, String, Boolean) -> Unit) {
+private fun CreateContainerDialog(onDismiss: () -> Unit, onCreate: (String, String, SetupOptions) -> Unit) {
     var image by remember { mutableStateOf("ubuntu:24.04") }
     var name by remember { mutableStateOf("") }
-    var tools by remember { mutableStateOf(true) }
+    var options by remember { mutableStateOf(SetupOptions.DEFAULT) }
     val error = remember(image) { runCatching { ImageRef.parse(image) }.exceptionOrNull()?.message }
 
     AlertDialog(
@@ -389,20 +414,25 @@ private fun CreateContainerDialog(onDismiss: () -> Unit, onCreate: (String, Stri
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = tools, onCheckedChange = { tools = it })
-                    Text("よく使うツールも入れる（curl・git・nano・less）", style = MaterialTheme.typography.bodyMedium)
+                SetupOptionRow("よく使うツールも入れる", "curl・git・nano・less", options.tools) {
+                    options = options.copy(tools = it)
+                }
+                SetupOptionRow("日本語環境にする", "表示を日本語に、時刻を日本時間にします", options.japanese) {
+                    options = options.copy(japanese = it)
+                }
+                SetupOptionRow("C・Java・Python を使えるようにする", "gcc・make・JDK・pip・venv", options.devTools) {
+                    options = options.copy(devTools = it)
                 }
                 Text(
                     "一般ユーザー「user」を作り、パスワードなしで sudo を使えるようにします。" +
-                        "数分かかり、通信量は 50〜300MB ほどです。",
+                        if (options.devTools) DEV_TOOLS_NOTE else "数分かかり、通信量は 50〜300MB ほどです。",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         },
         confirmButton = {
-            TextButton(onClick = { onCreate(image, name.trim(), tools) }, enabled = error == null) { Text("作成") }
+            TextButton(onClick = { onCreate(image, name.trim(), options) }, enabled = error == null) { Text("作成") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )

@@ -10,6 +10,9 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.zip.GZIPInputStream
 
+/** 初期設定の結果。[skipped] は入れられなかった任意のもの（日本語環境・C・Java・Python） */
+data class SetupResult(val config: ContainerConfig, val skipped: List<String>)
+
 /** コンテナの作成・初期設定・削除。中身は VM の中にあり、端末側に残るのは設定とレイヤーのキャッシュだけ */
 class ContainerManager(
     private val paths: Paths,
@@ -28,10 +31,10 @@ class ContainerManager(
     suspend fun create(
         imageInput: String,
         name: String,
-        installTools: Boolean,
+        options: SetupOptions,
         progress: ProgressListener,
         log: (String) -> Unit,
-    ): ContainerConfig = withContext(Dispatchers.IO) {
+    ): SetupResult = withContext(Dispatchers.IO) {
         paths.ensureBaseDirs()
         val ref = ImageRef.parse(imageInput)
         progress.onProgress("イメージの情報を取得しています", null)
@@ -72,7 +75,7 @@ class ContainerManager(
                 workingDir = resolved.config.workingDir,
             )
             store.save(config)
-            runSetup(config, installTools, progress, log)
+            runSetup(config, options, progress, log)
         } catch (e: Throwable) {
             runCatching { store.delete(id) }
             runCatching { withContext(kotlinx.coroutines.NonCancellable) { guest.deleteContainer(id) } }
@@ -81,20 +84,21 @@ class ContainerManager(
     }
 
     /**
-     * 初期設定（sudo のインストールと一般ユーザーの作成）。作成時のほか、失敗したときにやり直すのにも使う。
+     * 初期設定（sudo と選んだもののインストールと、一般ユーザーの作成）。作成時のほか、失敗したときにやり直すのにも使う。
      * sudo を入れられなかった場合は、root でログインするコンテナにする。
      */
     suspend fun runSetup(
         config: ContainerConfig,
-        installTools: Boolean,
+        options: SetupOptions,
         progress: ProgressListener,
         log: (String) -> Unit,
-    ): ContainerConfig = withContext(Dispatchers.IO) {
+    ): SetupResult = withContext(Dispatchers.IO) {
         val base = config.copy(user = ContainerConfig.DEFAULT_USER, home = "/home/${ContainerConfig.DEFAULT_USER}")
         setup.prepareBase(base)
 
-        progress.onProgress(if (installTools) "sudo とよく使うツールを入れています" else "sudo を入れています", null)
-        val exit = setup.installPackages(base, installTools, log)
+        progress.onProgress("${options.label()} を入れています", null)
+        val result = setup.installPackages(base, options, log) { step -> progress.onProgress(step, null) }
+        val exit = result.exit
 
         val updated = if (exit == 0) {
             setup.createUser(base)
@@ -105,7 +109,10 @@ class ContainerManager(
             base.copy(user = null, home = "/root", setupDone = true, sudoInstalled = false)
         }
         store.save(updated)
-        updated
+        if (result.skipped.isNotEmpty()) {
+            log("入れられなかったもの: ${result.skipped.joinToString("・")}（ネットワークや空き容量を確かめて、ターミナルから入れ直せます）")
+        }
+        SetupResult(updated, result.skipped)
     }
 
     /** 1.x の中身（移行・古いバックアップの復元）を VM で使えるように直す */

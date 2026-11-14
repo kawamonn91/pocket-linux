@@ -7,6 +7,7 @@ Android デバイス上で動作する、root 不要の Linux 環境・ターミ
 - **root 不要で本物の Linux**: 自前のカーネルが動くので、名前空間・cgroup・mount・iptables・Docker・ハードリンク・`/proc` がすべて本物。
 - **完全な sudo サポート**: 一般ユーザー（`user`）環境からパスワードなしで `sudo` が動作。
 - **Docker Hub からの直接 pull**: `ubuntu:24.04` などの公式 OCI イメージを直接取得・展開。
+- **すぐ使える日本語環境と開発環境**: コンテナの作成時に、日本語環境（`ja_JP.UTF-8` の表示と日本時間）と C（gcc・make）・Java（JDK）・Python（pip・venv）を入れる。作成画面のチェックで外せる。中身は `app/src/main/resources/pocketlinux/install-packages.sh`（apt・apk・dnf に対応）。
 - **組み込みターミナル**: Termux-View ベースの仮想端末・拡張キーボードを搭載。
 - **常駐サービス**: フォアグラウンドサービスで VM を動かし続ける。誰も使わなくなると VM は自動で止まる。
 - **日本語対応**: 日本語入力・文字入力欄のサポート。
